@@ -8,9 +8,32 @@ CLI client for streaming data to Databricks Change Vault using the Zerobus SDK.
 uv pip install -e .
 ```
 
-## Configuration
+## Usage
 
-All options can be set via CLI flags or environment variables:
+### Generate Proto
+
+Compile the bundled `record.proto` file to Python bindings:
+
+```bash
+dbx-cv-client generate-proto
+```
+
+| Flag | Environment Variable | Default | Description |
+|------|---------------------|---------|-------------|
+| `--compile-if-exists` | `DATABRICKS_PROTO_COMPILE_IF_EXISTS` | `true` | Recompile even if bindings exist |
+
+### Run Client
+
+Stream records to a Databricks table. This command automatically compiles the proto file if needed before starting the client.
+
+```bash
+dbx-cv-client client \
+  --host "https://adb-<workspace-id>.<region-id>.azuredatabricks.net" \
+  --region <region> \
+  --client-id <client-id> \
+  --client-secret <client-secret> \
+  --table-name <catalog>.<schema>.<table>
+```
 
 | Flag | Environment Variable | Description |
 |------|---------------------|-------------|
@@ -20,38 +43,16 @@ All options can be set via CLI flags or environment variables:
 | `--client-secret` | `DATABRICKS_CLIENT_SECRET` | OAuth client secret |
 | `--table-name` | `DATABRICKS_TABLE_NAME` | Fully qualified table name |
 
-## Usage
-
-### Generate Proto
-
-Generate a protobuf definition from a Unity Catalog table schema:
+#### Using Environment Variables
 
 ```bash
-dbx-cv-client \
-  --host "https://adb-123456789.11.azuredatabricks.net" \
-  --region eastus2 \
-  --client-id <client-id> \
-  --client-secret <client-secret> \
-  --table-name catalog.schema.table \
-  generate-proto
-```
+export DATABRICKS_HOST="https://adb-<workspace-id>.<region-id>.azuredatabricks.net"
+export DATABRICKS_REGION="<region>"
+export DATABRICKS_CLIENT_ID="<client-id>"
+export DATABRICKS_CLIENT_SECRET="<client-secret>"
+export DATABRICKS_TABLE_NAME="<catalog>.<schema>.<table>"
 
-Optional flags for `generate-proto`:
-- `--proto-msg`: Custom proto message name (default: derived from table name)
-- `--output`: Output path for the proto file (default: `src/dbx_cv_client/generated/record.proto`)
-
-### Run Client
-
-Stream records to the configured table:
-
-```bash
-dbx-cv-client \
-  --host "https://adb-123456789.11.azuredatabricks.net" \
-  --region eastus2 \
-  --client-id <client-id> \
-  --client-secret <client-secret> \
-  --table-name catalog.schema.table \
-  client
+dbx-cv-client client
 ```
 
 ## Development
@@ -60,4 +61,3 @@ dbx-cv-client \
 uv pip install -e ".[dev]"
 uv run pytest
 ```
-

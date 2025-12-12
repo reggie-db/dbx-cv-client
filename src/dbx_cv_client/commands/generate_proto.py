@@ -1,4 +1,4 @@
-"""Generate protobuf definitions from Unity Catalog table schemas."""
+"""Compile protobuf definitions to Python bindings."""
 
 import pathlib
 
@@ -10,14 +10,17 @@ LOG = logger(__name__)
 
 
 def run(compile_if_exists: bool) -> None:
-    """Fetches table schema from Unity Catalog and generates a proto2 file."""
+    """
+    Compiles record.proto to Python bindings using grpc_tools.
+
+    Args:
+        compile_if_exists: If False, skips compilation when record_pb2.py already exists.
+    """
     models_dir = pathlib.Path(models.__file__).parent
-    """Compiles a proto file to Python using grpc_tools."""
-    python_out = models_dir
-    proto_path = models_dir
     proto_file_name = "record.proto"
-    proto_file = proto_path / proto_file_name
-    proto_file_python = proto_path / (f"{proto_file.stem}_pb2.py")
+    proto_file = models_dir / proto_file_name
+    proto_file_python = models_dir / f"{proto_file.stem}_pb2.py"
+
     if not compile_if_exists and proto_file_python.exists():
         LOG.info(f"Proto file already exists: {proto_file_python}")
         return
@@ -26,11 +29,11 @@ def run(compile_if_exists: bool) -> None:
     exit_code = protoc.main(
         [
             "protoc",
-            f"--python_out={python_out}",
-            f"--proto_path={proto_path}",
+            f"--python_out={models_dir}",
+            f"--proto_path={models_dir}",
             proto_file_name,
         ]
     )
     if exit_code != 0:
         raise RuntimeError(f"Failed to compile proto file, exit code: {exit_code}")
-    LOG.info(f"Compiled python files to: {python_out}")
+    LOG.info(f"Compiled python files to: {models_dir}")

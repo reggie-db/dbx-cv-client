@@ -1,6 +1,5 @@
 """CLI entry point for interacting with Databricks Change Vault."""
 
-import asyncio
 import logging
 
 import typer
@@ -17,11 +16,12 @@ app = typer.Typer()
 @app.command()
 def generate_proto(
     compile_if_exists: bool = typer.Option(
-        envvar="DATABRICKS_PROTO_COMPILE_IF_EXISTS",
-        help="Compile if proto file already exists",
         default=True,
+        envvar="DATABRICKS_PROTO_COMPILE_IF_EXISTS",
+        help="Recompile proto even if Python bindings already exist",
     ),
 ):
+    """Compile the proto file to Python bindings."""
     generate_proto_run(compile_if_exists=compile_if_exists)
 
 
@@ -31,14 +31,17 @@ def client(
         envvar="DATABRICKS_HOST",
         help="Databricks workspace URL or host",
     ),
-    region: str | None = typer.Option(
-        envvar="DATABRICKS_REGION", help="Cloud region for the Zerobus endpoint"
+    region: str = typer.Option(
+        envvar="DATABRICKS_REGION",
+        help="Cloud region for the Zerobus endpoint",
     ),
     client_id: str = typer.Option(
-        envvar="DATABRICKS_CLIENT_ID", help="OAuth client ID"
+        envvar="DATABRICKS_CLIENT_ID",
+        help="OAuth client ID",
     ),
     client_secret: str = typer.Option(
-        envvar="DATABRICKS_CLIENT_SECRET", help="OAuth client secret"
+        envvar="DATABRICKS_CLIENT_SECRET",
+        help="OAuth client secret",
     ),
     table_name: str = typer.Option(
         envvar="DATABRICKS_TABLE_NAME",
@@ -46,7 +49,7 @@ def client(
     ),
 ):
     """Run the streaming client to ingest records."""
-    workspace_options: WorkspaceOptions = WorkspaceOptions(
+    workspace_options = WorkspaceOptions(
         host=host,
         region=region,
         client_id=client_id,
@@ -54,7 +57,7 @@ def client(
         table_name=table_name,
     )
     generate_proto_run(compile_if_exists=False)
-    asyncio.run(client_run(workspace_options))
+    client_run(workspace_options)
 
 
 if __name__ == "__main__":

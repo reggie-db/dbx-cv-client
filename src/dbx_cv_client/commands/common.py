@@ -11,7 +11,7 @@ _AZURE_DATABRICKS_DOMAIN = "azuredatabricks.net"
 @dataclass
 class WorkspaceOptions:
     """
-    Common CLI options passed to all subcommands via typer context.
+    Workspace configuration for connecting to Databricks.
 
     Attributes:
         host: Databricks workspace URL or host.

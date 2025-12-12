@@ -2,7 +2,8 @@
 
 import logging
 import os
-import pathlib
+
+from dbx_cv_client import models
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -17,6 +18,4 @@ def logger(name: str) -> logging.Logger:
     return log
 
 
-def generated_dir() -> pathlib.Path:
-    """Returns the path to the generated protobuf directory."""
-    return pathlib.Path(__file__).resolve().parent / "generated"
+__all__ = ["logger", "models"]

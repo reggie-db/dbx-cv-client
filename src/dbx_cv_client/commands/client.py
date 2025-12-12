@@ -1,4 +1,4 @@
-"""Streaming client for ingesting records to Databricks"""
+"""Streaming client for ingesting records to Databricks."""
 
 import asyncio
 import time
@@ -46,4 +46,5 @@ async def _run(workspace_options: WorkspaceOptions) -> None:
 
 
 def run(workspace_options: WorkspaceOptions) -> None:
+    """Runs the async streaming client."""
     asyncio.run(_run(workspace_options))
