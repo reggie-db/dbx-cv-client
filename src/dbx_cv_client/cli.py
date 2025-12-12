@@ -1,4 +1,4 @@
-"""CLI entry point for interacting with Databricks Change Vault."""
+"""CLI entry point for streaming data to Databricks ingestion tables."""
 
 import logging
 

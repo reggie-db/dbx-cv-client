@@ -1,6 +1,6 @@
 # dbx-cv-client
 
-CLI client for streaming data to Databricks Change Vault using the Zerobus SDK.
+CLI client for streaming data to Databricks ingestion tables using the Zerobus SDK.
 
 ## Installation
 

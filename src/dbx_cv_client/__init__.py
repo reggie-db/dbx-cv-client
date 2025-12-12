@@ -1,4 +1,4 @@
-"""Databricks Change Vault client library for streaming data ingestion."""
+"""Client library for streaming data to Databricks ingestion tables."""
 
 import logging
 import os
