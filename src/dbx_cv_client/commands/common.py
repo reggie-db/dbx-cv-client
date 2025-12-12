@@ -9,7 +9,7 @@ _AZURE_DATABRICKS_DOMAIN = "azuredatabricks.net"
 
 
 @dataclass
-class CommandOptions:
+class WorkspaceOptions:
     """
     Common CLI options passed to all subcommands via typer context.
 

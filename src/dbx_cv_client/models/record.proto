@@ -1,0 +1,8 @@
+syntax = "proto2";
+
+message Raw {
+	optional string id = 1;
+	optional int64 timestamp = 2;
+	optional string metadata = 3;
+	optional bytes content = 4;
+}

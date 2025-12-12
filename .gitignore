@@ -53,4 +53,4 @@ htmlcov/
 Thumbs.db
 
 # Generated
-generated/
+src/dbx_cv_client/models/record_pb2.py
