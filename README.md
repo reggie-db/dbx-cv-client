@@ -1,6 +1,10 @@
 # dbx-cv-client
 
-CLI client for streaming data to Databricks ingestion tables using the Zerobus SDK.
+CLI client for streaming RTSP video frames to Databricks ingestion tables using the Zerobus SDK.
+
+## Prerequisites
+
+- ffmpeg installed and available in PATH
 
 ## Installation
 
@@ -24,10 +28,11 @@ dbx-cv-client generate-proto
 
 ### Run Client
 
-Stream records to a Databricks table. This command automatically compiles the proto file if needed before starting the client.
+Stream RTSP video frames to a Databricks table. This command automatically compiles the proto file if needed before starting the client.
 
 ```bash
 dbx-cv-client client \
+  --rtsp-url "rtsp://<host>:<port>/<path>" \
   --host "https://adb-<workspace-id>.<region-id>.azuredatabricks.net" \
   --region <region> \
   --client-id <client-id> \
@@ -37,6 +42,7 @@ dbx-cv-client client \
 
 | Flag | Environment Variable | Description |
 |------|---------------------|-------------|
+| `--rtsp-url` | `RTSP_URL` | RTSP stream URL to capture frames from |
 | `--host` | `DATABRICKS_HOST` | Databricks workspace URL or host |
 | `--region` | `DATABRICKS_REGION` | Cloud region for Zerobus endpoint |
 | `--client-id` | `DATABRICKS_CLIENT_ID` | OAuth client ID |
@@ -46,6 +52,7 @@ dbx-cv-client client \
 #### Using Environment Variables
 
 ```bash
+export RTSP_URL="rtsp://<host>:<port>/<path>"
 export DATABRICKS_HOST="https://adb-<workspace-id>.<region-id>.azuredatabricks.net"
 export DATABRICKS_REGION="<region>"
 export DATABRICKS_CLIENT_ID="<client-id>"

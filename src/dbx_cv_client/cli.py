@@ -17,7 +17,7 @@ app = typer.Typer()
 def generate_proto(
     compile_if_exists: bool = typer.Option(
         default=True,
-        envvar="DATABRICKS_PROTO_COMPILE_IF_EXISTS",
+        envvar="PROTO_COMPILE_IF_EXISTS",
         help="Recompile proto even if Python bindings already exist",
     ),
 ):
@@ -47,8 +47,25 @@ def client(
         envvar="DATABRICKS_TABLE_NAME",
         help="Fully qualified table name (catalog.schema.table)",
     ),
+    flush_interval: float = typer.Option(
+        default=5.0,
+        envvar="FLUSH_INTERVAL",
+        help="Seconds between flushes",
+    ),
+    ffmpeg_args: list[str] = typer.Option(
+        [],
+        "--ffmpeg-arg",
+        envvar="FFMPEG_ARGS",
+        help="FFmpeg arguments",
+    ),
+    sources: list[str] = typer.Option(
+        None,
+        "--source",
+        envvar="SOURCES",
+        help="Source URLs for camera frames (RTSP, HTTP, etc.)",
+    ),
 ):
-    """Run the streaming client to ingest records."""
+    """Stream camera frames to a Databricks ingestion table."""
     workspace_options = WorkspaceOptions(
         host=host,
         region=region,
@@ -57,7 +74,7 @@ def client(
         table_name=table_name,
     )
     generate_proto_run(compile_if_exists=False)
-    client_run(workspace_options)
+    client_run(workspace_options, flush_interval, ffmpeg_args, sources)
 
 
 if __name__ == "__main__":
