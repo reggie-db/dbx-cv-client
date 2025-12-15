@@ -1,10 +1,10 @@
 # dbx-cv-client
 
-CLI client for streaming RTSP video frames to Databricks ingestion tables using the Zerobus SDK.
+CLI client for streaming camera frames to Databricks ingestion tables via the Zerobus SDK. Supports RTSP streams (via FFmpeg) and Meraki camera snapshots.
 
 ## Prerequisites
 
-- ffmpeg installed and available in PATH
+- FFmpeg installed and in PATH (for RTSP sources)
 
 ## Installation
 
@@ -16,50 +16,99 @@ uv pip install -e .
 
 ### Generate Proto
 
-Compile the bundled `record.proto` file to Python bindings:
+Compile the bundled `record.proto` to Python bindings:
 
 ```bash
 dbx-cv-client generate-proto
 ```
 
-| Flag | Environment Variable | Default | Description |
-|------|---------------------|---------|-------------|
-| `--compile-if-exists` | `DATABRICKS_PROTO_COMPILE_IF_EXISTS` | `true` | Recompile even if bindings exist |
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--compile-if-exists` | `PROTO_COMPILE_IF_EXISTS` | `true` | Recompile even if bindings exist |
 
 ### Run Client
 
-Stream RTSP video frames to a Databricks table. This command automatically compiles the proto file if needed before starting the client.
+Stream camera frames to a Databricks table:
 
 ```bash
 dbx-cv-client client \
-  --rtsp-url "rtsp://<host>:<port>/<path>" \
-  --host "https://adb-<workspace-id>.<region-id>.azuredatabricks.net" \
+  --source "rtsp://<host>:<port>/<path>" \
+  --source "<meraki-device-serial>" \
+  --host "https://adb-<workspace-id>.<region>.azuredatabricks.net" \
   --region <region> \
   --client-id <client-id> \
   --client-secret <client-secret> \
   --table-name <catalog>.<schema>.<table>
 ```
 
-| Flag | Environment Variable | Description |
-|------|---------------------|-------------|
-| `--rtsp-url` | `RTSP_URL` | RTSP stream URL to capture frames from |
-| `--host` | `DATABRICKS_HOST` | Databricks workspace URL or host |
-| `--region` | `DATABRICKS_REGION` | Cloud region for Zerobus endpoint |
+#### Databricks Options
+
+| Flag | Env Var | Description |
+|------|---------|-------------|
+| `--host` | `DATABRICKS_HOST` | Workspace URL or host |
+| `--region` | `DATABRICKS_REGION` | Cloud region for Zerobus |
 | `--client-id` | `DATABRICKS_CLIENT_ID` | OAuth client ID |
 | `--client-secret` | `DATABRICKS_CLIENT_SECRET` | OAuth client secret |
 | `--table-name` | `DATABRICKS_TABLE_NAME` | Fully qualified table name |
 
-#### Using Environment Variables
+#### Source Options
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--source` | `SOURCES` | | Camera source (RTSP URL or Meraki serial) |
+| `--fps` | `FPS` | `1` | Frames per second |
+| `--scale` | `SCALE` | `480` | Image height in pixels |
+| `--flush-interval` | `FLUSH_INTERVAL` | `5.0` | Seconds between flushes |
+
+#### Meraki Options
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--meraki-api-base-url` | `MERAKI_API_BASE_URL` | `https://api.meraki.com/api/v1` | API base URL |
+| `--meraki-api-token` | `MERAKI_API_TOKEN` | | API token (if not using Key Vault) |
+| `--meraki-vault-url` | `MERAKI_VAULT_URL` | | Azure Key Vault URL |
+| `--meraki-secret-name` | `MERAKI_SECRET_NAME` | | Secret name in Key Vault |
+
+#### RTSP Options
+
+| Flag | Env Var | Description |
+|------|---------|-------------|
+| `--ffmpeg-arg` | `RTPSP_FFMPEG_ARGS` | Additional FFmpeg arguments |
+
+### Examples
+
+#### RTSP Stream
 
 ```bash
-export RTSP_URL="rtsp://<host>:<port>/<path>"
-export DATABRICKS_HOST="https://adb-<workspace-id>.<region-id>.azuredatabricks.net"
-export DATABRICKS_REGION="<region>"
+export DATABRICKS_HOST="https://adb-123456789.11.azuredatabricks.net"
+export DATABRICKS_REGION="us-west-2"
 export DATABRICKS_CLIENT_ID="<client-id>"
 export DATABRICKS_CLIENT_SECRET="<client-secret>"
-export DATABRICKS_TABLE_NAME="<catalog>.<schema>.<table>"
+export DATABRICKS_TABLE_NAME="catalog.schema.frames"
 
-dbx-cv-client client
+dbx-cv-client client --source "rtsp://camera.local:554/stream"
+```
+
+#### Meraki Camera
+
+```bash
+dbx-cv-client client \
+  --source "XXXX-YYYY-ZZZZ" \
+  --meraki-api-token "<api-token>" \
+  --host "$DATABRICKS_HOST" \
+  --region "$DATABRICKS_REGION" \
+  --client-id "$DATABRICKS_CLIENT_ID" \
+  --client-secret "$DATABRICKS_CLIENT_SECRET" \
+  --table-name "$DATABRICKS_TABLE_NAME"
+```
+
+#### Multiple Sources
+
+```bash
+dbx-cv-client client \
+  --source "rtsp://cam1.local:554/stream" \
+  --source "MERAKI-SERIAL-001" \
+  --source "MERAKI-SERIAL-002"
 ```
 
 ## Development
@@ -67,4 +116,16 @@ dbx-cv-client client
 ```bash
 uv pip install -e ".[dev]"
 uv run pytest
+```
+
+## Testing
+
+A mock Meraki server is included for testing:
+
+```bash
+# Terminal 1: Start mock server
+uv run python tests/mock_meraki_server.py test_image.jpg
+
+# Terminal 2: Run test client
+uv run python tests/test_meraki_reader.py --frames 3
 ```

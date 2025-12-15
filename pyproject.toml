@@ -9,6 +9,9 @@ description = "CLI client for streaming data to Databricks ingestion tables"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "aiohttp",
+  "azure-identity",
+  "azure-keyvault-secrets",
   "databricks-zerobus-ingest-sdk",
   "grpcio-tools>=1.60.0,<2.0",
   "numpy",
