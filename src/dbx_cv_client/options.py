@@ -1,7 +1,6 @@
 """Common options and utilities shared across CLI commands."""
 
 from dataclasses import dataclass
-from functools import cached_property
 from urllib.parse import parse_qs, urlparse
 
 import typer
@@ -113,7 +112,6 @@ class MerakiOptions:
     vault_url: str | None = None
     secret_name: str | None = None
 
-    @cached_property
     async def cisco_meraki_api_key(self) -> str:
         """Get Meraki API key from token or Key Vault."""
         if self.api_token is None and (

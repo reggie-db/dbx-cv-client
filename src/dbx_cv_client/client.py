@@ -5,7 +5,6 @@ import json
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
 
 import typer
 from zerobus.sdk import TableProperties
@@ -18,22 +17,22 @@ from dbx_cv_client.options import MerakiOptions, WorkspaceOptions
 LOG = logger(__name__)
 
 
-@dataclass
-class StreamContext:
-    ready: asyncio.Event
-    cam_reader: CamReader
-    _frame: bytes | None = field(init=False, default=None)
-
-    async def run(self) -> None:
-        async for frame in self.cam_reader.read():
-            self._frame = frame
-            self.ready.set()
-
-    async def frame(self) -> bytes | None:
-        if frame := self._frame:
-            self._frame = None
-            return frame
-        return None
+async def _run_cam_reader(
+    stop: asyncio.Event,
+    cam_reader: CamReader,
+    retry_delay: float = 5.0,
+) -> None:
+    attempt = 0
+    while not stop.is_set():
+        try:
+            await cam_reader.run()
+        except Exception:
+            LOG.error(
+                f"Error running cam reader {cam_reader.source} on attempt {attempt}",
+                exc_info=True,
+            )
+            attempt += 1
+            await asyncio.sleep(retry_delay)
 
 
 async def _run(
@@ -63,7 +62,8 @@ async def _run(
         count = 0
         last_flush = time.monotonic()
         cam_reader_tasks: list[asyncio.Task] = [
-            asyncio.create_task(cam_reader.run()) for cam_reader in cam_readers
+            asyncio.create_task(_run_cam_reader(stop, cam_reader))
+            for cam_reader in cam_readers
         ]
         try:
             while not stop.is_set():

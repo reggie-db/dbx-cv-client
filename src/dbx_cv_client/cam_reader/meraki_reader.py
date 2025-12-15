@@ -141,7 +141,7 @@ class MerakiReader(CamReader):
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={
-                    "X-Cisco-Meraki-API-Key": await self.meraki_options.cisco_meraki_api_key,
+                    "X-Cisco-Meraki-API-Key": await self.meraki_options.cisco_meraki_api_key(),
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                 }
