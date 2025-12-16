@@ -28,7 +28,7 @@ async def _run_cam_reader(
             await cam_reader.run()
         except Exception:
             LOG.error(
-                f"Error running cam reader {cam_reader.source} on attempt {attempt}",
+                f"Error running cam reader {cam_reader} on attempt {attempt}",
                 exc_info=True,
             )
             attempt += 1
@@ -73,6 +73,7 @@ async def _run(
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
                         metadata = {
+                            "stream_id": cam_reader.stream_id,
                             "source": cam_reader.source,
                             "fps": cam_reader.fps,
                             "scale": cam_reader.scale,
@@ -84,7 +85,7 @@ async def _run(
                             content=frame,
                         )
                         await stream.ingest_record(record)
-                        LOG.info(f"Ingested frame {cam_reader.source}")
+                        LOG.info(f"Ingested frame {cam_reader}")
                         count += 1
                         ingested = True
                 if ingested:
@@ -170,7 +171,7 @@ def run(
     ),
     rtsp_ffmpeg_args: list[str] = typer.Option(
         [],
-        "--ffmpeg-arg",
+        "--rtsp-ffmpeg-arg",
         envvar="RTPSP_FFMPEG_ARGS",
         help="Additional FFmpeg arguments for RTSP sources",
     ),

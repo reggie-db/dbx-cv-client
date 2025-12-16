@@ -139,6 +139,7 @@ class MerakiReader(CamReader):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
         if self._session is None or self._session.closed:
+            LOG.info(f"Creating Meraki session: {self}")
             self._session = aiohttp.ClientSession(
                 headers={
                     "X-Cisco-Meraki-API-Key": await self.meraki_options.cisco_meraki_api_key(),

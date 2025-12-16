@@ -4,6 +4,7 @@ import asyncio
 import re
 from abc import ABC, abstractmethod
 from typing import AsyncIterable
+from urllib.parse import urlparse
 
 from dbx_cv_client import logger
 from dbx_cv_client.options import MerakiOptions
@@ -66,12 +67,27 @@ class CamReader(ABC):
             raise ValueError("source required")
         self._frame: bytes | None = None
 
+    @property
+    def stream_id(self) -> str:
+        try:
+            parsed = urlparse(self.source)
+            path = parsed.path or ""
+            parts = [p for p in path.split("/") if p]
+            if parts:
+                joined = "_".join(parts)
+                cleaned = re.sub(r"[^0-9A-Za-z]+", "_", joined)
+                return cleaned or self.source
+        except Exception:
+            pass
+
+        return self.source
+
     async def run(self) -> None:
         """Run the reader, setting ready event when frames are available."""
         async for frame in self._read():
             self._frame = frame
             self.ready.set()
-            LOG.info(f"Produced frame {self.source}")
+            LOG.info(f"Produced frame {self}")
 
     def get_frame(self) -> bytes | None:
         """Get and clear the current frame, or None if no frame available."""
@@ -84,3 +100,7 @@ class CamReader(ABC):
     async def _read(self) -> AsyncIterable[bytes]:
         """Yield frames from the camera source."""
         ...
+
+    def __str__(self):
+        redacted = re.sub(r"://.*?@", "://[REDACTED]@", self.source)
+        return f"{type(self).__name__}[{redacted}]"
