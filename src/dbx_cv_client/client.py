@@ -7,8 +7,10 @@ import time
 import uuid
 
 import typer
-from zerobus.sdk import TableProperties
-from zerobus.sdk.aio import ZerobusSdk
+from zerobus.sdk import StreamConfigurationOptions, TableProperties
+from zerobus.sdk.aio import ZerobusStream
+from zerobus.sdk.aio.zerobus_sdk import grpc
+from zerobus.sdk.shared import OAuthHeadersProvider, zerobus_service_pb2_grpc
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
@@ -45,18 +47,7 @@ async def _run(
     """Streams RTSP frames to a Databricks ingestion table."""
     import dbx_cv_client.models.record_pb2 as record_pb2
 
-    table_properties = TableProperties(
-        workspace_options.table_name, record_pb2.Raw.DESCRIPTOR
-    )
-
-    sdk_handle = ZerobusSdk(
-        workspace_options.server_endpoint,
-        workspace_options.workspace_url,
-    )
-
-    stream = await sdk_handle.create_stream(
-        workspace_options.client_id, workspace_options.client_secret, table_properties
-    )
+    stream = await _create_stream(workspace_options)
 
     try:
         count = 0
@@ -101,6 +92,59 @@ async def _run(
             await asyncio.gather(*cam_reader_tasks, return_exceptions=True)
     finally:
         await stream.close()
+
+
+async def _create_stream(
+    workspace_options: WorkspaceOptions,
+) -> ZerobusStream:
+    LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
+    LOG.info(f"zerobus workspace_url: {workspace_options.workspace_url}")
+
+    import dbx_cv_client.models.record_pb2 as record_pb2
+
+    table_properties = TableProperties(
+        workspace_options.table_name, record_pb2.Raw.DESCRIPTOR
+    )
+
+    headers_provider = OAuthHeadersProvider(
+        workspace_options.workspace_id,
+        workspace_options.workspace_url,
+        workspace_options.table_name,
+        workspace_options.client_id,
+        workspace_options.client_secret,
+    )
+    channel_options = [
+        ("grpc.max_send_message_length", -1),
+        ("grpc.max_receive_message_length", -1),
+    ]
+    if workspace_options.zerobus_ip:
+        target = f"{workspace_options.zerobus_ip}:443"
+        channel_options.extend(
+            [
+                ("grpc.ssl_target_name_override", workspace_options.server_endpoint),
+                ("grpc.default_authority", workspace_options.server_endpoint),
+            ]
+        )
+    else:
+        target = workspace_options.server_endpoint
+
+    channel = grpc.aio.secure_channel(
+        target,
+        grpc.ssl_channel_credentials(),
+        options=channel_options,
+    )
+
+    stub = zerobus_service_pb2_grpc.ZerobusStub(channel)
+
+    stream = ZerobusStream(
+        stub,
+        headers_provider,
+        table_properties,
+        StreamConfigurationOptions(),
+    )
+
+    await stream._initialize()
+    return stream
 
 
 def run(
@@ -175,14 +219,22 @@ def run(
         envvar="RTPSP_FFMPEG_ARGS",
         help="Additional FFmpeg arguments for RTSP sources",
     ),
+    zerobus_ip: str = typer.Option(
+        None,
+        "--zerobus-ip",
+        envvar="ZEROBUS_IP",
+        help="Override DNS Zerobus host IP",
+    ),
 ) -> None:
     """Runs the async streaming client until interrupted."""
+
     workspace_options = WorkspaceOptions(
         host=host,
         region=region,
         client_id=client_id,
         client_secret=client_secret,
         table_name=table_name,
+        zerobus_ip=zerobus_ip,
     )
 
     meraki_options = MerakiOptions(

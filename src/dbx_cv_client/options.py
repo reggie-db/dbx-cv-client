@@ -28,6 +28,7 @@ class WorkspaceOptions:
     client_id: str
     client_secret: str
     table_name: str
+    zerobus_ip: str | None = None
 
     @property
     def workspace_host(self) -> str:
