@@ -51,10 +51,7 @@ class MerakiReader(CamReader):
                 start_time = asyncio.get_event_loop().time()
 
                 data, img = await self._request_snapshot()
-                if self.scale > 0:
-                    yield self._resize_image(img)
-                else:
-                    yield data
+                yield self._resize_image(img) or data
 
                 elapsed = asyncio.get_event_loop().time() - start_time
                 sleep_time = max(0, frame_interval - elapsed)
@@ -131,15 +128,23 @@ class MerakiReader(CamReader):
                     raise aiohttp.ClientError(f"Unexpected status {img_resp.status}")
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
-    def _resize_image(self, img: np.ndarray) -> bytes:
-        """Resize image to target height (scale) maintaining aspect ratio."""
+    def _resize_image(self, img: np.ndarray) -> bytes | None:
+        if not self.scale:
+            return None
+
         h, w = img.shape[:2]
+        if h == self.scale:
+            return None
+
         new_h = self.scale
         new_w = int(w * (new_h / h))
 
         resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        _, encoded = cv2.imencode(".jpg", resized)
-        return encoded.tobytes()
+        ok, buf = cv2.imencode(".jpg", resized)
+        if not ok:
+            raise ValueError("Failed to encode image")
+
+        return buf.tobytes()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
