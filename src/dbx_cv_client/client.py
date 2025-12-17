@@ -41,6 +41,7 @@ async def _run(
     stop: asyncio.Event,
     ready: asyncio.Event,
     flush_interval: float,
+    frame_multiplier: int,
     workspace_options: WorkspaceOptions,
     cam_readers: list[CamReader],
 ) -> None:
@@ -63,22 +64,28 @@ async def _run(
                 ingested = False
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
-                        metadata = {
-                            "stream_id": cam_reader.stream_id,
-                            "source": cam_reader.source,
-                            "fps": cam_reader.fps,
-                            "scale": cam_reader.scale,
-                        }
-                        record = record_pb2.Raw(
-                            id=str(uuid.uuid4()),
-                            timestamp=(time.time_ns() // 1_000),
-                            metadata=json.dumps(metadata),
-                            content=frame,
-                        )
-                        await stream.ingest_record(record)
-                        LOG.info(f"Ingested frame {cam_reader}")
-                        count += 1
-                        ingested = True
+                        for idx in range((0 + (frame_multiplier or 0))):
+                            stream_id = cam_reader.stream_id
+                            if idx > 0:
+                                stream_id = f"{stream_id}_{idx}"
+                            metadata = {
+                                "stream_id": stream_id,
+                                "source": cam_reader.source,
+                                "fps": cam_reader.fps,
+                                "scale": cam_reader.scale,
+                            }
+                            record = record_pb2.Raw(
+                                id=str(uuid.uuid4()),
+                                timestamp=(time.time_ns() // 1_000),
+                                metadata=json.dumps(metadata),
+                                content=frame,
+                            )
+                            await stream.ingest_record(record)
+                            LOG.info(
+                                f"Ingested frame - stream_id: {stream_id} cam_reader: {cam_reader}"
+                            )
+                            count += 1
+                            ingested = True
                 if ingested:
                     now = time.monotonic()
                     if now - last_flush >= flush_interval:
@@ -225,6 +232,12 @@ def run(
         envvar="ZEROBUS_IP",
         help="Override DNS Zerobus host IP",
     ),
+    frame_multiplier: int = typer.Option(
+        0,
+        "--frame-multiplier",
+        envvar="FRAME_MULTIPLIER",
+        help="Sends a frame multiple times",
+    ),
 ) -> None:
     """Runs the async streaming client until interrupted."""
 
@@ -269,6 +282,7 @@ def run(
                 stop=stop,
                 ready=ready,
                 flush_interval=flush_interval,
+                frame_multiplier=frame_multiplier,
                 workspace_options=workspace_options,
                 cam_readers=cam_readers,
             )

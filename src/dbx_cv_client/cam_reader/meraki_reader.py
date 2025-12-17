@@ -82,7 +82,7 @@ class MerakiReader(CamReader):
         async with session.post(
             url, json=payload, timeout=aiohttp.ClientTimeout(total=30)
         ) as resp:
-            if resp.status != 200:
+            if resp.status // 100 != 2:
                 error_text = await resp.text()
                 raise aiohttp.ClientError(
                     f"Snapshot request failed: {resp.status} - {error_text}"
@@ -114,7 +114,7 @@ class MerakiReader(CamReader):
             async with session.get(
                 image_url, timeout=aiohttp.ClientTimeout(total=30)
             ) as img_resp:
-                if img_resp.status == 200:
+                if img_resp.status // 100 != 2:
                     return await img_resp.read()
                 elif img_resp.status != 404:
                     raise aiohttp.ClientError(f"Unexpected status {img_resp.status}")
