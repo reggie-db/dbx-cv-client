@@ -9,7 +9,7 @@ from dbx_cv_client.generate_proto import run as generate_proto_run
 
 logging.basicConfig(level=logging.INFO)
 
-app = typer.Typer()
+app = typer.Typer(rich_markup_mode=None)
 
 
 @app.command()

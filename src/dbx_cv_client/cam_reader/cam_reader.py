@@ -17,9 +17,10 @@ def create_cam_reader(
     ready: asyncio.Event,
     fps: int,
     scale: int,
-    meraki_options: MerakiOptions,
-    rtsp_ffmpeg_args: list[str],
     source: str,
+    stream_id: str | None = None,
+    meraki_options: MerakiOptions | None = None,
+    rtsp_ffmpeg_args: list[str] | None = None,
 ) -> "CamReader":
     if re.match(r"^rtsps?://", source):
         from dbx_cv_client.cam_reader.rtsp_reader import RTSPReader
@@ -31,6 +32,7 @@ def create_cam_reader(
             fps=fps,
             scale=scale,
             source=source,
+            stream_id=stream_id,
             rtsp_ffmpeg_args=rtsp_ffmpeg_args,
         )
     else:
@@ -38,12 +40,13 @@ def create_cam_reader(
 
         LOG.info(f"Creating Meraki reader for source: {source}")
         return MerakiReader(
+            meraki_options=meraki_options,
             stop=stop,
             ready=ready,
             fps=fps,
             scale=scale,
             source=source,
-            meraki_options=meraki_options,
+            stream_id=stream_id,
         )
 
 
@@ -57,6 +60,7 @@ class CamReader(ABC):
         fps: int,
         scale: int,
         source: str,
+        stream_id: str | None = None,
     ):
         self.stop = stop
         self.ready = ready
@@ -65,10 +69,13 @@ class CamReader(ABC):
         self.source = source
         if not source:
             raise ValueError("source required")
+        self._stream_id = stream_id
         self._frame: bytes | None = None
 
     @property
     def stream_id(self) -> str:
+        if self._stream_id:
+            return self._stream_id
         try:
             parsed = urlparse(self.source)
             path = parsed.path or ""

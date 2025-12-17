@@ -20,12 +20,13 @@ class MerakiReader(CamReader):
 
     def __init__(
         self,
+        meraki_options: MerakiOptions,
         stop: asyncio.Event,
         ready: asyncio.Event,
         fps: int,
         scale: int,
         source: str,
-        meraki_options: MerakiOptions,
+        stream_id: str | None = None,
     ):
         """
         Args:
@@ -36,7 +37,7 @@ class MerakiReader(CamReader):
             source: Meraki device serial number.
             meraki_options: Meraki API configuration.
         """
-        super().__init__(stop, ready, fps, scale, source)
+        super().__init__(stop, ready, fps, scale, source, stream_id)
 
         self.meraki_options = meraki_options
         self._session: aiohttp.ClientSession | None = None
