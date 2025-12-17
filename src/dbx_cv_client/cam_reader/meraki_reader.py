@@ -69,7 +69,7 @@ class MerakiReader(CamReader):
         fullframe: bool = True,
         max_retries: int = 20,
         retry_delay: float = 1.0,
-    ) -> bytes:
+    ) -> np.ndarray:
         """Request a snapshot and poll until ready."""
         session = await self._get_session()
 
@@ -82,7 +82,7 @@ class MerakiReader(CamReader):
         async with session.post(
             url, json=payload, timeout=aiohttp.ClientTimeout(total=30)
         ) as resp:
-            if resp.status // 100 != 2:
+            if resp.status >= 200 and resp.status < 300:
                 error_text = await resp.text()
                 raise aiohttp.ClientError(
                     f"Snapshot request failed: {resp.status} - {error_text}"
@@ -114,22 +114,16 @@ class MerakiReader(CamReader):
             async with session.get(
                 image_url, timeout=aiohttp.ClientTimeout(total=30)
             ) as img_resp:
-                if img_resp.status // 100 != 2:
+                if img_resp.status >= 200 and img_resp.status < 300:
                     data = await img_resp.read()
-
-                    if not data:
-                        continue
-
-                    try:
-                        img_array = np.frombuffer(data, dtype=np.uint8)
-                        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                    except Exception:
-                        continue
-
-                    if img is None:
-                        continue
-
-                    return data
+                    if data:
+                        try:
+                            img_array = np.frombuffer(data, dtype=np.uint8)
+                            if img := cv2.imdecode(img_array, cv2.IMREAD_COLOR):
+                                return img
+                        except Exception:
+                            LOG.warning(f"Failed to decode image: {image_url}")
+                    continue
                 elif img_resp.status != 404:
                     raise aiohttp.ClientError(f"Unexpected status {img_resp.status}")
 
@@ -138,11 +132,8 @@ class MerakiReader(CamReader):
 
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
-    def _resize_image(self, image_bytes: bytes) -> bytes:
+    def _resize_image(self, img: np.ndarray) -> bytes:
         """Resize image to target height (scale) maintaining aspect ratio."""
-        img_array = np.frombuffer(image_bytes, dtype=np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
         h, w = img.shape[:2]
         new_h = self.scale
         new_w = int(w * (new_h / h))
