@@ -115,7 +115,21 @@ class MerakiReader(CamReader):
                 image_url, timeout=aiohttp.ClientTimeout(total=30)
             ) as img_resp:
                 if img_resp.status // 100 != 2:
-                    return await img_resp.read()
+                    data = await img_resp.read()
+
+                    if not data:
+                        continue
+
+                    try:
+                        img_array = np.frombuffer(data, dtype=np.uint8)
+                        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    except Exception:
+                        continue
+
+                    if img is None:
+                        continue
+
+                    return data
                 elif img_resp.status != 404:
                     raise aiohttp.ClientError(f"Unexpected status {img_resp.status}")
 
