@@ -53,7 +53,7 @@ class MerakiReader(CamReader):
                 frame = await self._request_snapshot()
                 if self.scale > 0:
                     frame = self._resize_image(frame)
-                yield frame
+                yield frame.tobytes()
 
                 elapsed = asyncio.get_event_loop().time() - start_time
                 sleep_time = max(0, frame_interval - elapsed)
