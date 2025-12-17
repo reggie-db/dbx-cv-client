@@ -132,7 +132,7 @@ class MerakiReader(CamReader):
 
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
-    def _resize_image(self, img: np.ndarray) -> bytes:
+    def _resize_image(self, img: np.ndarray) -> np.ndarray:
         """Resize image to target height (scale) maintaining aspect ratio."""
         h, w = img.shape[:2]
         new_h = self.scale
@@ -140,7 +140,7 @@ class MerakiReader(CamReader):
 
         resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
         _, encoded = cv2.imencode(".jpg", resized)
-        return encoded.tobytes()
+        return encoded
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
