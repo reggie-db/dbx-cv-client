@@ -73,6 +73,7 @@ async def _run(
                 ready.clear()
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
+                        frame_count = 0
                         for idx in range((0 + (frame_multiplier or 0))):
                             stream_id = cam_reader.stream_id
                             if idx > 0:
@@ -90,10 +91,22 @@ async def _run(
                                 content=frame,
                             )
                             await stream.ingest_record(record)
+                            frame_count += 1
                             total_count += 1
-                            LOG.info(
-                                f"Ingested frame - stream_id: {stream_id} total: {total_count}"
+                        try:
+                            unacked_records = (
+                                len(stream._ZerobusStream__unacked_records)
+                                + stream._ZerobusStream__record_queue.qsize()
                             )
+                        except Exception:
+                            LOG.error(
+                                f"Error getting unacked records for stream {stream_id}",
+                                exc_info=True,
+                            )
+                            unacked_records = "unknown"
+                        LOG.info(
+                            f"Ingested frame - stream_id: {stream_id} frame_count: {frame_count} unacked: {unacked_records} total: {total_count}"
+                        )
 
         finally:
             stop.set()
@@ -148,22 +161,24 @@ async def _create_stream(
     )
 
     stub = zerobus_service_pb2_grpc.ZerobusStub(channel)
-    stream_configuration_options = {}
-    if max_inflight_records is not None:
-        stream_configuration_options["max_inflight_records"] = max_inflight_records
-    if flush_timeout_ms is not None:
-        stream_configuration_options["flush_timeout_ms"] = flush_timeout_ms
 
     def _ack_callback(response: IngestRecordResponse):
         LOG.info(f"Record acknowledged: {response}")
 
+    stream_configuration_options = StreamConfigurationOptions(
+        ack_callback=_ack_callback
+    )
+    if max_inflight_records is not None:
+        stream_configuration_options.max_inflight_records = max_inflight_records
+    if flush_timeout_ms is not None:
+        stream_configuration_options.flush_timeout_ms = flush_timeout_ms
+    LOG.info(f"Stream configuration options: {stream_configuration_options.__dict__}")
+
     stream = ZerobusStream(
-        stub,
-        headers_provider,
-        table_properties,
-        StreamConfigurationOptions(
-            ack_callback=_ack_callback, **stream_configuration_options
-        ),
+        stub=stub,
+        headers_provider=headers_provider,
+        table_properties=table_properties,
+        options=stream_configuration_options,
     )
 
     await stream._initialize()
