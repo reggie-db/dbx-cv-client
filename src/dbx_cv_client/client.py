@@ -11,6 +11,7 @@ from zerobus.sdk import StreamConfigurationOptions, TableProperties
 from zerobus.sdk.aio import ZerobusStream
 from zerobus.sdk.aio.zerobus_sdk import grpc
 from zerobus.sdk.shared import OAuthHeadersProvider, zerobus_service_pb2_grpc
+from zerobus.sdk.shared.definitions import IngestRecordResponse
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
@@ -40,7 +41,8 @@ async def _run_cam_reader(
 async def _run(
     stop: asyncio.Event,
     ready: asyncio.Event,
-    flush_interval: float,
+    max_inflight_records: int | None,
+    flush_timeout_ms: int | None,
     frame_multiplier: int,
     workspace_options: WorkspaceOptions,
     cam_readers: list[CamReader],
@@ -48,11 +50,19 @@ async def _run(
     """Streams RTSP frames to a Databricks ingestion table."""
     import dbx_cv_client.models.record_pb2 as record_pb2
 
-    stream = await _create_stream(workspace_options)
+    if max_inflight_records is None:
+        max_inflight_records = len(cam_readers) * 10
+        if frame_multiplier:
+            max_inflight_records *= frame_multiplier
+
+    stream = await _create_stream(
+        workspace_options,
+        max_inflight_records=max_inflight_records,
+        flush_timeout_ms=flush_timeout_ms,
+    )
 
     try:
-        count = 0
-        last_flush = time.monotonic()
+        total_count = 0
         cam_reader_tasks: list[asyncio.Task] = [
             asyncio.create_task(_run_cam_reader(stop, cam_reader))
             for cam_reader in cam_readers
@@ -61,7 +71,6 @@ async def _run(
             while not stop.is_set():
                 await ready.wait()
                 ready.clear()
-                ingested = False
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
                         for idx in range((0 + (frame_multiplier or 0))):
@@ -81,28 +90,25 @@ async def _run(
                                 content=frame,
                             )
                             await stream.ingest_record(record)
+                            total_count += 1
                             LOG.info(
-                                f"Ingested frame - stream_id: {stream_id} cam_reader: {cam_reader}"
+                                f"Ingested frame - stream_id: {stream_id} total: {total_count}"
                             )
-                            count += 1
-                            ingested = True
-                if ingested:
-                    now = time.monotonic()
-                    if now - last_flush >= flush_interval:
-                        await stream.flush()
-                        LOG.info(f"Flushed {count} frames")
-                        last_flush = now
+
         finally:
             stop.set()
             for cam_reader_task in cam_reader_tasks:
                 cam_reader_task.cancel()
             await asyncio.gather(*cam_reader_tasks, return_exceptions=True)
     finally:
+        await stream.flush()
         await stream.close()
 
 
 async def _create_stream(
     workspace_options: WorkspaceOptions,
+    max_inflight_records: int | None,
+    flush_timeout_ms: int | None,
 ) -> ZerobusStream:
     LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
     LOG.info(f"zerobus workspace_url: {workspace_options.workspace_url}")
@@ -142,12 +148,22 @@ async def _create_stream(
     )
 
     stub = zerobus_service_pb2_grpc.ZerobusStub(channel)
+    stream_configuration_options = {}
+    if max_inflight_records is not None:
+        stream_configuration_options["max_inflight_records"] = max_inflight_records
+    if flush_timeout_ms is not None:
+        stream_configuration_options["flush_timeout_ms"] = flush_timeout_ms
+
+    def _ack_callback(response: IngestRecordResponse):
+        LOG.info(f"Record acknowledged: {response}")
 
     stream = ZerobusStream(
         stub,
         headers_provider,
         table_properties,
-        StreamConfigurationOptions(),
+        StreamConfigurationOptions(
+            ack_callback=_ack_callback, **stream_configuration_options
+        ),
     )
 
     await stream._initialize()
@@ -175,10 +191,15 @@ def run(
         envvar="DATABRICKS_TABLE_NAME",
         help="Fully qualified table name (catalog.schema.table)",
     ),
-    flush_interval: float = typer.Option(
-        default=5.0,
-        envvar="FLUSH_INTERVAL",
-        help="Seconds between flushes",
+    flush_timeout_ms: int | None = typer.Option(
+        default=(1000 * 5),
+        envvar="FLUSH_TIMEOUT_MS",
+        help="Timeout for flushing the stream in milliseconds",
+    ),
+    max_inflight_records: int | None = typer.Option(
+        default=None,
+        envvar="MAX_INFLIGHT_RECORDS",
+        help="Maximum number of records that can be sent to the server before waiting for acknowledgment",
     ),
     fps: int = typer.Option(
         default=1,
@@ -281,7 +302,8 @@ def run(
             _run(
                 stop=stop,
                 ready=ready,
-                flush_interval=flush_interval,
+                flush_timeout_ms=flush_timeout_ms,
+                max_inflight_records=max_inflight_records,
                 frame_multiplier=frame_multiplier,
                 workspace_options=workspace_options,
                 cam_readers=cam_readers,
