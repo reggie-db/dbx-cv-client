@@ -50,10 +50,11 @@ class MerakiReader(CamReader):
             while not self.stop.is_set():
                 start_time = asyncio.get_event_loop().time()
 
-                frame = await self._request_snapshot()
+                data, img = await self._request_snapshot()
                 if self.scale > 0:
-                    frame = self._resize_image(frame)
-                yield frame.tobytes()
+                    yield self._resize_image(img)
+                else:
+                    yield data
 
                 elapsed = asyncio.get_event_loop().time() - start_time
                 sleep_time = max(0, frame_interval - elapsed)
@@ -69,7 +70,7 @@ class MerakiReader(CamReader):
         fullframe: bool = True,
         max_retries: int = 20,
         retry_delay: float = 1.0,
-    ) -> np.ndarray:
+    ) -> tuple[bytes, np.ndarray]:
         """Request a snapshot and poll until ready."""
         session = await self._get_session()
 
@@ -120,7 +121,7 @@ class MerakiReader(CamReader):
                         try:
                             img_array = np.frombuffer(data, dtype=np.uint8)
                             if img := cv2.imdecode(img_array, cv2.IMREAD_COLOR):
-                                return img
+                                return data, img
                         except Exception:
                             LOG.warning(f"Failed to decode image: {image_url}")
                     continue
@@ -132,7 +133,7 @@ class MerakiReader(CamReader):
 
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
-    def _resize_image(self, img: np.ndarray) -> np.ndarray:
+    def _resize_image(self, img: np.ndarray) -> bytes:
         """Resize image to target height (scale) maintaining aspect ratio."""
         h, w = img.shape[:2]
         new_h = self.scale
@@ -140,7 +141,7 @@ class MerakiReader(CamReader):
 
         resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
         _, encoded = cv2.imencode(".jpg", resized)
-        return encoded
+        return encoded.tobytes()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
