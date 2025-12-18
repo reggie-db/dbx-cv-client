@@ -105,6 +105,7 @@ class MerakiReader(CamReader):
         for attempt in range(max_retries):
             if attempt > 0:
                 await asyncio.sleep(retry_delay)
+            LOG.info(f"Polling for snapshot: {image_url} attempt {attempt}")
             if exp_dt and datetime.now(tz=exp_dt.tzinfo) >= exp_dt:
                 raise TimeoutError(f"Snapshot URL expired at {expiry}")
 
@@ -124,8 +125,7 @@ class MerakiReader(CamReader):
                         except Exception:
                             LOG.warning(f"Failed to decode image: {image_url}")
                     continue
-                elif img_resp.status != 404:
-                    raise aiohttp.ClientError(f"Unexpected status {img_resp.status}")
+                LOG.warning(f"Unexpected status {img_resp.status}")
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
     def _resize_image(self, img: np.ndarray) -> bytes | None:
