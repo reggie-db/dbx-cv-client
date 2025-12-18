@@ -52,6 +52,7 @@ def _log_stats(
         zerobus_stats = _zerobus_stats[0] or ZerobusStats()
         stats = {
             "running": running,
+            "state": stream._ZerobusStream__state,
             "pending_ack": pending_ack,
             "queued": queued,
         }
