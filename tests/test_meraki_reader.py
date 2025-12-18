@@ -11,17 +11,9 @@ async def test_meraki_reader(
     scale: int = 0,
     device_serial: str = "TEST-SERIAL-001",
 ):
-    """
-    Run the MerakiReader test against a running mock server.
-
-    Args:
-        base_url: Base URL of the mock Meraki server.
-        num_frames: Number of frames to capture before stopping.
-        fps: Frames per second setting.
-        scale: Image scale (height) setting, 0 to disable resizing.
-        device_serial: Device serial to use in requests.
-    """
+    """Run MerakiReader test against mock server."""
     from dbx_cv_client.cam_reader.meraki_reader import MerakiReader
+    from dbx_cv_client.options import MerakiOptions
 
     print("MerakiReader Test")
     print("=" * 50)
@@ -34,21 +26,27 @@ async def test_meraki_reader(
     print()
 
     stop_event = asyncio.Event()
+    ready_event = asyncio.Event()
+
+    meraki_options = MerakiOptions(
+        api_base_url=base_url,
+        api_token="test-api-token",
+    )
 
     reader = MerakiReader(
+        meraki_options=meraki_options,
         stop=stop_event,
+        ready=ready_event,
         fps=fps,
         scale=scale,
-        device_serial=device_serial,
-        api_token="test-api-token",
-        meraki_base_url=base_url,
+        source=device_serial,
     )
 
     print("Capturing frames...")
     print("-" * 50)
 
     frame_count = 0
-    async for frame in reader.read():
+    async for frame in reader._read():
         frame_count += 1
         print(f"[Frame {frame_count}] Received {len(frame)} bytes")
 

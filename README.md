@@ -4,6 +4,7 @@ CLI client for streaming camera frames to Databricks ingestion tables via the Ze
 
 ## Prerequisites
 
+- Python 3.12+
 - FFmpeg installed and in PATH (for RTSP sources)
 
 ## Installation
@@ -50,6 +51,15 @@ dbx-cv-client client \
 | `--client-id` | `DATABRICKS_CLIENT_ID` | OAuth client ID |
 | `--client-secret` | `DATABRICKS_CLIENT_SECRET` | OAuth client secret |
 | `--table-name` | `DATABRICKS_TABLE_NAME` | Fully qualified table name |
+| `--zerobus-ip` | `ZEROBUS_IP` | Override DNS Zerobus host IP |
+
+#### Stream Options
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--flush-interval` | `FLUSH_INTERVAL` | `5.0` | Seconds between flushes |
+| `--max-inflight-records` | `MAX_INFLIGHT_RECORDS` | `10000` | Max records before waiting for ack |
+| `--log-stats-interval` | `LOG_STATS_INTERVAL` | `5.0` | Seconds between stats logs |
 
 #### Source Options
 
@@ -57,8 +67,8 @@ dbx-cv-client client \
 |------|---------|---------|-------------|
 | `--source` | `SOURCES` | | Camera source (RTSP URL or Meraki serial) |
 | `--fps` | `FPS` | `1` | Frames per second |
-| `--scale` | `SCALE` | `480` | Image height in pixels |
-| `--flush-interval` | `FLUSH_INTERVAL` | `5.0` | Seconds between flushes |
+| `--scale` | `SCALE` | `1080` | Image height in pixels |
+| `--frame-multiplier` | `FRAME_MULTIPLIER` | `0` | Send each frame N extra times |
 
 #### Meraki Options
 
@@ -69,11 +79,13 @@ dbx-cv-client client \
 | `--meraki-vault-url` | `MERAKI_VAULT_URL` | | Azure Key Vault URL |
 | `--meraki-secret-name` | `MERAKI_SECRET_NAME` | | Secret name in Key Vault |
 
+Meraki cameras include device info (name, model, location, etc.) in frame metadata, fetched once at startup.
+
 #### RTSP Options
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `--ffmpeg-arg` | `RTPSP_FFMPEG_ARGS` | Additional FFmpeg arguments |
+| `--rtsp-ffmpeg-arg` | `RTSP_FFMPEG_ARGS` | Additional FFmpeg arguments |
 
 ### Examples
 

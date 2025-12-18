@@ -28,15 +28,6 @@ class MerakiReader(CamReader):
         source: str,
         stream_id: str | None = None,
     ):
-        """
-        Args:
-            stop: Event to signal stop.
-            ready: Event to signal frame ready.
-            fps: Target frames per second.
-            scale: Target image height (0 to disable resize).
-            source: Meraki device serial number.
-            meraki_options: Meraki API configuration.
-        """
         super().__init__(stop, ready, fps, scale, source, stream_id)
 
         self.meraki_options = meraki_options

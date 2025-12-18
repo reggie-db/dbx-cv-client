@@ -210,17 +210,7 @@ async def _create_stream(
     workspace_options: WorkspaceOptions,
     max_inflight_records: int | None,
 ) -> ZerobusStream:
-    """
-    Create and initialize a ZerobusStream.
-
-    Args:
-        workspace_options: Databricks workspace configuration.
-        max_inflight_records: Max records before waiting for ack.
-        flush_timeout_ms: Flush timeout in milliseconds.
-
-    Returns:
-        Initialized ZerobusStream.
-    """
+    """Create and initialize a ZerobusStream."""
     LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
     LOG.info(f"zerobus workspace_url: {workspace_options.workspace_url}")
 

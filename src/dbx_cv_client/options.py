@@ -12,16 +12,7 @@ _AZURE_DATABRICKS_DOMAIN = "azuredatabricks.net"
 
 @dataclass
 class WorkspaceOptions:
-    """
-    Workspace configuration for connecting to Databricks.
-
-    Attributes:
-        host: Databricks workspace URL or host.
-        region: Cloud region for the Zerobus endpoint.
-        client_id: OAuth client ID.
-        client_secret: OAuth client secret.
-        table_name: Fully qualified table name (catalog.schema.table).
-    """
+    """Databricks workspace configuration."""
 
     host: str
     region: str
@@ -50,12 +41,7 @@ class WorkspaceOptions:
 
     @staticmethod
     def _parse_host(value: str) -> tuple[str, str]:
-        """
-        Parses a Databricks workspace URL/host and extracts (host, workspace_id).
-
-        For Azure Databricks: extracts workspace ID from the 'adb-' subdomain prefix.
-        For other domains: extracts workspace ID from the 'o' query parameter.
-        """
+        """Parse URL/host to (host, workspace_id)."""
         raw = value.strip().lower()
         if "://" not in raw:
             raw = f"https://{raw}"
@@ -82,11 +68,7 @@ class WorkspaceOptions:
 
     @staticmethod
     def _server_endpoint(workspace_host: str, workspace_id: str, region: str) -> str:
-        """
-        Builds the Zerobus server endpoint URL.
-
-        Format: <workspace_id>.zerobus.<region>.<domain>
-        """
+        """Build Zerobus server endpoint URL."""
         if not region:
             raise ValueError("Region required to construct Zerobus server endpoint")
 
@@ -98,15 +80,7 @@ class WorkspaceOptions:
 
 @dataclass
 class MerakiOptions:
-    """
-    Meraki API configuration.
-
-    Attributes:
-        api_base_url: Base URL for Meraki API.
-        api_token: API token (if provided directly).
-        vault_url: Azure Key Vault URL (if using Key Vault).
-        secret_name: Secret name in Key Vault (if using Key Vault).
-    """
+    """Meraki API configuration."""
 
     api_base_url: str
     api_token: str | None = None
