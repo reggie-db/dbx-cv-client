@@ -188,6 +188,7 @@ async def _run(
                     and flush_interval is not None
                     and time.monotonic() - last_flush >= flush_interval
                 ):
+                    LOG.info("Flush requested")
                     await stream.flush()
                     last_flush = time.monotonic()
         finally:
