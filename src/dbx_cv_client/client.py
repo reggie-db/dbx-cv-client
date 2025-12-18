@@ -5,7 +5,9 @@ import json
 import os
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 
+import pyaml
 import typer
 from zerobus.sdk import StreamConfigurationOptions, TableProperties
 from zerobus.sdk.aio import ZerobusStream
@@ -18,6 +20,79 @@ from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
 from dbx_cv_client.options import MerakiOptions, WorkspaceOptions
 
 LOG = logger(__name__)
+
+
+_FLUSH_INTERVAL_DEFAULT = 5.0
+_MAX_INFLIGHT_RECORDS_DEFAULT = 10_000
+
+
+@dataclass
+class ZerobusStats:
+    """Tracks Zerobus stream statistics."""
+
+    flush_count: int = field(default=0)  # Records flushed to server
+    ack_count: int = field(default=0)
+    ingest_count: int = field(default=0)  # Records sent to stream
+
+
+# Mutable container for tracking zerobus ack count across callbacks
+_zerobus_stats: list[ZerobusStats | None] = [None]
+
+
+def _log_stats(
+    cam_readers: list[CamReader], stream: ZerobusStream, running: bool = True
+) -> None:
+    total_produce = sum(r.produce_count for r in cam_readers)
+    total_consume = sum(r.consume_count for r in cam_readers)
+    if total_produce > 0 or total_consume > 0:
+        # __pending_futures: sent but not yet acknowledged
+        # __record_queue: queued but not yet sent
+        pending_ack = len(stream._ZerobusStream__pending_futures)
+        queued = stream._ZerobusStream__record_queue.qsize()
+        zerobus_stats = _zerobus_stats[0] or ZerobusStats()
+        stats = {
+            "running": running,
+            "pending_ack": pending_ack,
+            "queued": queued,
+        }
+        stats.update(asdict(zerobus_stats))
+        stats.update(
+            {
+                "total_produce": total_produce,
+                "total_consume": total_consume,
+            }
+        )
+        stats.update(
+            {
+                "streams": {
+                    reader.stream_id: {
+                        "produce": reader.produce_count,
+                        "consume": reader.consume_count,
+                    }
+                    for reader in cam_readers
+                }
+            }
+        )
+
+        stats_yaml = pyaml.dump(stats, sort_keys=False).strip()
+        LOG.info(f"Stats:\n{stats_yaml}")
+
+
+async def _log_stats_periodically(
+    stop: asyncio.Event,
+    cam_readers: list[CamReader],
+    stream: ZerobusStream,
+    interval: float,
+) -> None:
+    """Log aggregate stats from cam_readers every interval seconds."""
+    while not stop.is_set():
+        try:
+            await asyncio.sleep(interval)
+            _log_stats(cam_readers, stream)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            LOG.error("Error logging stats", exc_info=True)
 
 
 async def _run_cam_reader(
@@ -42,7 +117,8 @@ async def _run(
     stop: asyncio.Event,
     ready: asyncio.Event,
     max_inflight_records: int | None,
-    flush_timeout_ms: int | None,
+    flush_interval: float | None,
+    log_stats_interval: float,
     frame_multiplier: int,
     workspace_options: WorkspaceOptions,
     cam_readers: list[CamReader],
@@ -50,30 +126,38 @@ async def _run(
     """Streams RTSP frames to a Databricks ingestion table."""
     import dbx_cv_client.models.record_pb2 as record_pb2
 
-    if max_inflight_records is None:
-        max_inflight_records = len(cam_readers) * 10
-        if frame_multiplier:
-            max_inflight_records *= frame_multiplier
+    # Reset zerobus stats
+    zerobus_stats = ZerobusStats()
+    _zerobus_stats[0] = zerobus_stats
 
     stream = await _create_stream(
         workspace_options,
         max_inflight_records=max_inflight_records,
-        flush_timeout_ms=flush_timeout_ms,
     )
 
     try:
-        total_count = 0
         cam_reader_tasks: list[asyncio.Task] = [
             asyncio.create_task(_run_cam_reader(stop, cam_reader))
             for cam_reader in cam_readers
         ]
+        stats_task = asyncio.create_task(
+            _log_stats_periodically(
+                stop=stop,
+                cam_readers=cam_readers,
+                stream=stream,
+                interval=log_stats_interval,
+            )
+        )
+        last_flush: float | None = None
         try:
             while not stop.is_set():
                 await ready.wait()
                 ready.clear()
+                ingested = False
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
-                        frame_count = 0
+                        if last_flush is None:
+                            last_flush = time.monotonic()
                         for idx in range((0 + (frame_multiplier or 0))):
                             stream_id = cam_reader.stream_id
                             if idx > 0:
@@ -90,39 +174,49 @@ async def _run(
                                 metadata=json.dumps(metadata),
                                 content=frame,
                             )
-                            await stream.ingest_record(record)
-                            frame_count += 1
-                            total_count += 1
-                        try:
-                            unacked_records = (
-                                len(stream._ZerobusStream__unacked_records)
-                                + stream._ZerobusStream__record_queue.qsize()
-                            )
-                        except Exception:
-                            LOG.error(
-                                f"Error getting unacked records for stream {stream_id}",
-                                exc_info=True,
-                            )
-                            unacked_records = "unknown"
-                        LOG.info(
-                            f"Ingested frame - stream_id: {stream_id} frame_count: {frame_count} unacked: {unacked_records} total: {total_count}"
-                        )
+                            # await queues the record; returned future (for ack) is ignored
+                            ack_future = await stream.ingest_record(record)
 
+                            def _done_callback(_: IngestRecordResponse):
+                                zerobus_stats.ack_count += 1
+
+                            ack_future.add_done_callback(_done_callback)
+                            ingested = True
+                            zerobus_stats.ingest_count += 1
+                if (
+                    ingested
+                    and flush_interval is not None
+                    and time.monotonic() - last_flush >= flush_interval
+                ):
+                    await stream.flush()
+                    last_flush = time.monotonic()
         finally:
             stop.set()
+            stats_task.cancel()
             for cam_reader_task in cam_reader_tasks:
                 cam_reader_task.cancel()
-            await asyncio.gather(*cam_reader_tasks, return_exceptions=True)
+            await stream.flush()
+            await asyncio.gather(*cam_reader_tasks, stats_task, return_exceptions=True)
+            _log_stats(cam_readers, stream, running=False)
     finally:
-        await stream.flush()
         await stream.close()
 
 
 async def _create_stream(
     workspace_options: WorkspaceOptions,
     max_inflight_records: int | None,
-    flush_timeout_ms: int | None,
 ) -> ZerobusStream:
+    """
+    Create and initialize a ZerobusStream.
+
+    Args:
+        workspace_options: Databricks workspace configuration.
+        max_inflight_records: Max records before waiting for ack.
+        flush_timeout_ms: Flush timeout in milliseconds.
+
+    Returns:
+        Initialized ZerobusStream.
+    """
     LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
     LOG.info(f"zerobus workspace_url: {workspace_options.workspace_url}")
 
@@ -162,16 +256,17 @@ async def _create_stream(
 
     stub = zerobus_service_pb2_grpc.ZerobusStub(channel)
 
-    def _ack_callback(response: IngestRecordResponse):
-        LOG.info(f"Record acknowledged: {response}")
+    def _ack_callback(_: IngestRecordResponse):
+        # Track acknowledged records
+        zerobus_stats = _zerobus_stats[0] or ZerobusStats()
+        zerobus_stats.flush_count += 1
+        _zerobus_stats[0] = zerobus_stats
 
     stream_configuration_options = StreamConfigurationOptions(
         ack_callback=_ack_callback
     )
     if max_inflight_records is not None:
         stream_configuration_options.max_inflight_records = max_inflight_records
-    if flush_timeout_ms is not None:
-        stream_configuration_options.flush_timeout_ms = flush_timeout_ms
     LOG.info(f"Stream configuration options: {stream_configuration_options.__dict__}")
 
     stream = ZerobusStream(
@@ -206,15 +301,20 @@ def run(
         envvar="DATABRICKS_TABLE_NAME",
         help="Fully qualified table name (catalog.schema.table)",
     ),
-    flush_timeout_ms: int | None = typer.Option(
-        default=(1000 * 5),
-        envvar="FLUSH_TIMEOUT_MS",
-        help="Timeout for flushing the stream in milliseconds",
+    flush_interval: float | None = typer.Option(
+        default=_FLUSH_INTERVAL_DEFAULT,
+        envvar="FLUSH_INTERVAL",
+        help="Interval for flushing the stream in seconds",
     ),
     max_inflight_records: int | None = typer.Option(
-        default=None,
+        default=_MAX_INFLIGHT_RECORDS_DEFAULT,
         envvar="MAX_INFLIGHT_RECORDS",
         help="Maximum number of records that can be sent to the server before waiting for acknowledgment",
+    ),
+    log_stats_interval: float = typer.Option(
+        default=5.0,
+        envvar="LOG_STATS_INTERVAL",
+        help="Interval for logging stats in seconds",
     ),
     fps: int = typer.Option(
         default=1,
@@ -317,8 +417,9 @@ def run(
             _run(
                 stop=stop,
                 ready=ready,
-                flush_timeout_ms=flush_timeout_ms,
+                flush_interval=flush_interval,
                 max_inflight_records=max_inflight_records,
+                log_stats_interval=log_stats_interval,
                 frame_multiplier=frame_multiplier,
                 workspace_options=workspace_options,
                 cam_readers=cam_readers,

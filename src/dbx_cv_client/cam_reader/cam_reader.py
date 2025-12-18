@@ -71,6 +71,8 @@ class CamReader(ABC):
             raise ValueError("source required")
         self._stream_id = stream_id
         self._frame: bytes | None = None
+        self.produce_count = 0
+        self.consume_count = 0
 
     @property
     def stream_id(self) -> str:
@@ -94,12 +96,13 @@ class CamReader(ABC):
         async for frame in self._read():
             self._frame = frame
             self.ready.set()
-            LOG.info(f"Produced frame {self}")
+            self.produce_count += 1
 
     def get_frame(self) -> bytes | None:
         """Get and clear the current frame, or None if no frame available."""
         if frame := self._frame:
             self._frame = None
+            self.consume_count += 1
             return frame
         return None
 

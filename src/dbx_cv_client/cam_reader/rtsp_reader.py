@@ -1,15 +1,19 @@
 """RTSP camera reader using FFmpeg for frame capture."""
 
 import asyncio
+import time
 from typing import AsyncIterable
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader
 
+_MAX_BUFFER_SIZE = 2 * 1024 * 1024  # 2MB safety cap
 _JPEG_START = b"\xff\xd8"
 _JPEG_END = b"\xff\xd9"
 _RESTART_DELAY = 5.0
-_INITIAL_TIMEOUT = 30.0
+_FRAME_TIMEOUT = 15.0
+_INITIAL_FRAME_TIMEOUT = 30.0
+
 
 LOG = logger(__name__)
 
@@ -31,21 +35,16 @@ class RTSPReader(CamReader):
         self.buffer = b""
         self.rtsp_ffmpeg_args = rtsp_ffmpeg_args
         self._rtsp_ffmpeg_process: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task | None = None
 
     async def _read(self) -> AsyncIterable[bytes]:
-        # Subsequent timeouts use fps * 5 (min 5s)
-        frame_timeout = max(5.0, self.fps * 5.0)
-        first_frame_received = False
-
         while not self.stop.is_set():
-            self._rtsp_ffmpeg_process = await self._start_ffmpeg_process()
+            process, stderr_task = await self._start_ffmpeg_process()
+            self._rtsp_ffmpeg_process = process
+            self._stderr_task = stderr_task
             self.buffer = b""
-            last_frame_time = asyncio.get_event_loop().time()
-            current_timeout = (
-                max(_INITIAL_TIMEOUT, frame_timeout)
-                if not first_frame_received
-                else frame_timeout
-            )
+            last_frame_time = time.monotonic()
+            current_timeout = _INITIAL_FRAME_TIMEOUT
 
             try:
                 while (
@@ -53,7 +52,7 @@ class RTSPReader(CamReader):
                     and self._rtsp_ffmpeg_process.returncode is None
                 ):
                     # Check if we've exceeded the frame timeout
-                    elapsed = asyncio.get_event_loop().time() - last_frame_time
+                    elapsed = time.monotonic() - last_frame_time
                     if elapsed >= current_timeout:
                         LOG.warning(
                             f"No frames for {elapsed:.1f}s, restarting ffmpeg: {self}"
@@ -75,20 +74,37 @@ class RTSPReader(CamReader):
                         continue
 
                     self.buffer += chunk
+
+                    # Hard safety cap to prevent unbounded buffer growth
+                    if len(self.buffer) > _MAX_BUFFER_SIZE:
+                        LOG.warning(f"Buffer overflow, resetting buffer: {self}")
+                        self.buffer = b""
+                        break
+
                     while not self.stop.is_set():
                         start = self.buffer.find(_JPEG_START)
-                        end = self.buffer.find(_JPEG_END)
-                        if start == -1 or end == -1:
+                        if start == -1:
+                            # Keep only the last byte in case it's the first half of \xff\xd8
+                            self.buffer = self.buffer[-1:] if self.buffer else b""
                             break
+
+                        if start > 0:
+                            # Discard junk before JPEG start
+                            self.buffer = self.buffer[start:]
+
+                        end = self.buffer.find(_JPEG_END, start + 2)
+                        if end == -1:
+                            break
+
                         frame = self.buffer[start : end + 2]
                         self.buffer = self.buffer[end + 2 :]
-                        last_frame_time = asyncio.get_event_loop().time()
-                        # Switch to normal timeout after first frame
-                        if not first_frame_received:
-                            first_frame_received = True
-                            current_timeout = frame_timeout
+
+                        last_frame_time = time.monotonic()
+                        current_timeout = _FRAME_TIMEOUT
+
                         yield frame
             finally:
+                self._stderr_task.cancel()
                 if self._rtsp_ffmpeg_process.returncode is None:
                     self._rtsp_ffmpeg_process.terminate()
                     await self._rtsp_ffmpeg_process.wait()
@@ -98,7 +114,9 @@ class RTSPReader(CamReader):
                 LOG.info(f"Waiting {_RESTART_DELAY}s before restarting ffmpeg: {self}")
                 await asyncio.sleep(_RESTART_DELAY)
 
-    async def _start_ffmpeg_process(self) -> asyncio.subprocess.Process:
+    async def _start_ffmpeg_process(
+        self,
+    ) -> tuple[asyncio.subprocess.Process, asyncio.Task]:
         """Start FFmpeg subprocess for RTSP stream capture."""
         cmds = [
             "ffmpeg",
@@ -112,8 +130,14 @@ class RTSPReader(CamReader):
                 ("-rtsp_transport", "tcp"),
                 "-an",
                 "-sn",
+                ("-fflags", "nobuffer"),
+                ("-flags", "low_delay"),
+                ("-max_delay", "500000"),
+                ("-rtsp_flags", "prefer_tcp"),
+                ("-reorder_queue_size", "0"),
                 ("-i", self.source),
-                ("-vf", f"fps={self.fps},scale=-1:{self.scale}"),
+                ("-vf", f"fps={self.fps},scale=-1:{self.scale},format=yuvj420p"),
+                ("-pix_fmt", "yuvj420p"),
                 ("-q:v", "7"),
                 ("-threads", "1"),
                 ("-f", "mjpeg"),
@@ -125,9 +149,39 @@ class RTSPReader(CamReader):
             for part in cmds
             for item in (part if isinstance(part, tuple) else (part,))
         ]
+
+        async def _log_ffmpeg_stderr(
+            self, proc: asyncio.subprocess.Process, color: str = "\033[31m"
+        ):
+            prefix = f"[{self.stream_id}]"
+            # Filter noisy decoder errors
+            h264_filters = [
+                "error while decoding",
+                "cabac decode of qscale diff failed",
+                "bad cseq c6de",
+                "block unavailable",
+            ]
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+
+                try:
+                    msg = line.decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    continue
+
+                if "[h264 @ " in msg and any(filter in msg for f in h264_filters):
+                    continue
+
+                LOG.error(f"{color}{prefix} {msg}\033[0m")
+
         LOG.info(f"Starting RTSP reader: {self}")
-        return await asyncio.create_subprocess_exec(
+
+        process = await asyncio.create_subprocess_exec(
             *proc_cmds,
             stdout=asyncio.subprocess.PIPE,
-            stderr=None,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stderr_task = asyncio.create_task(_log_ffmpeg_stderr(self, process))
+        return process, stderr_task
