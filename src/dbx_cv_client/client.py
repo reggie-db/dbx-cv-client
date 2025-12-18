@@ -159,7 +159,7 @@ async def _run(
                     if frame := cam_reader.get_frame():
                         if last_flush is None:
                             last_flush = time.monotonic()
-                        for idx in range((0 + (frame_multiplier or 0))):
+                        for idx in range(1 + (frame_multiplier or 0)):
                             stream_id = cam_reader.stream_id
                             if idx > 0:
                                 stream_id = f"{stream_id}_{idx}"
