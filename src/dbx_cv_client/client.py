@@ -169,6 +169,8 @@ async def _run(
                                 "fps": cam_reader.fps,
                                 "scale": cam_reader.scale,
                             }
+                            if cam_reader.device_info:
+                                metadata["device_info"] = cam_reader.device_info
                             record = record_pb2.Raw(
                                 id=str(uuid.uuid4()),
                                 timestamp=(time.time_ns() // 1_000),
@@ -324,7 +326,7 @@ def run(
         help="Frames per second",
     ),
     scale: int = typer.Option(
-        default=480,
+        default=1080,
         envvar="SCALE",
         help="Scale",
     ),

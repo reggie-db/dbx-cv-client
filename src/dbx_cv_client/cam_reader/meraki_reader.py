@@ -41,10 +41,22 @@ class MerakiReader(CamReader):
 
         self.meraki_options = meraki_options
         self._session: aiohttp.ClientSession | None = None
+        self._device_info: dict | None = None
+        self._device_info_fetched: bool = False
+
+    @property
+    def device_info(self) -> dict | None:
+        """Device info from Meraki API (fetched once on first read)."""
+        return self._device_info
 
     async def _read(self) -> AsyncIterable[bytes]:
         """Yield camera frames at the configured FPS rate."""
         frame_interval = 1.0 / self.fps if self.fps > 0 else 1.0
+
+        # Fetch device info once on first read
+        if not self._device_info_fetched:
+            await self._fetch_device_info()
+            self._device_info_fetched = True
 
         try:
             while not self.stop.is_set():
@@ -169,3 +181,38 @@ class MerakiReader(CamReader):
                 }
             )
         return self._session
+
+    async def _fetch_device_info(self, max_retries: int = 3) -> None:
+        """Fetch device info from Meraki API (one-time, with retries)."""
+        session = await self._get_session()
+        url = f"{self.meraki_options.api_base_url}/devices/{self.source}"
+
+        for attempt in range(max_retries):
+            try:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status // 100 == 2:
+                        self._device_info = await resp.json()
+                        LOG.info(
+                            f"Device info fetched: name={self._device_info.get('name')}, "
+                            f"model={self._device_info.get('model')}, "
+                            f"serial={self._device_info.get('serial')}"
+                        )
+                        return
+                    error_text = await resp.text()
+                    LOG.warning(
+                        f"Device info request failed (attempt {attempt + 1}/{max_retries}): "
+                        f"{resp.status} - {error_text}"
+                    )
+            except Exception as e:
+                LOG.warning(
+                    f"Device info request error (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0)
+
+        LOG.warning(
+            f"Failed to fetch device info after {max_retries} attempts, continuing without it"
+        )

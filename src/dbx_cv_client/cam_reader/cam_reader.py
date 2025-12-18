@@ -91,6 +91,11 @@ class CamReader(ABC):
 
         return self.source
 
+    @property
+    def device_info(self) -> dict | None:
+        """Device info from source API (if available)."""
+        return None
+
     async def run(self) -> None:
         """Run the reader, setting ready event when frames are available."""
         async for frame in self._read():
