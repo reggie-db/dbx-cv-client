@@ -113,17 +113,28 @@ class MerakiReader(CamReader):
                 raise asyncio.CancelledError("Stop requested")
 
             async with session.get(
-                image_url, timeout=aiohttp.ClientTimeout(total=30)
+                image_url,
+                headers={"Accept": "*/*"},
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as img_resp:
                 if img_resp.status // 100 == 2:
                     data = await img_resp.read()
                     if data:
                         try:
                             img_array = np.frombuffer(data, dtype=np.uint8)
-                            if img := cv2.imdecode(img_array, cv2.IMREAD_COLOR):
+                            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                            if img is not None:
+                                LOG.info(
+                                    f"Snapshot received: {len(data)} bytes, "
+                                    f"shape={img.shape}"
+                                )
                                 return data, img
-                        except Exception:
-                            LOG.warning(f"Failed to decode image: {image_url}")
+                            LOG.warning(
+                                f"Failed to decode image: {len(data)} bytes, "
+                                f"first bytes: {data[:20].hex()}"
+                            )
+                        except Exception as e:
+                            LOG.warning(f"Failed to decode image: {e}")
                     continue
                 LOG.warning(f"Unexpected status {img_resp.status}")
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
