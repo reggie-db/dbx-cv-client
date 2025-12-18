@@ -148,7 +148,7 @@ class MerakiReader(CamReader):
                         except Exception as e:
                             LOG.warning(f"Failed to decode image: {e}")
                     continue
-                LOG.warning(f"Unexpected status {img_resp.status}")
+                LOG.debug(f"Unexpected status {img_resp.status}")
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
     def _resize_image(self, img: np.ndarray) -> bytes | None:
