@@ -17,7 +17,7 @@ from zerobus.sdk.aio import ZerobusStream
 from zerobus.sdk.aio.zerobus_sdk import grpc
 from zerobus.sdk.shared import OAuthHeadersProvider, zerobus_service_pb2_grpc
 
-from dbx_cv_client import logger
+from dbx_cv_client import ip_info, logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
 from dbx_cv_client.options import CamReaderOptions, MerakiOptions, WorkspaceOptions
 
@@ -100,7 +100,7 @@ async def _run(
 
     try:
         ip_info_data = (
-            await ip_info(
+            await ip_info_service.get(
                 client_options.metadata_ip_info_url,
                 client_options.metadata_ip_info_attempts,
                 client_options.metadata_ip_info_retry_interval,
@@ -230,53 +230,6 @@ async def _create_stream(
 
     await stream._initialize()
     return stream
-
-
-@lru_cache(maxsize=None)
-async def ip_info(
-    url: str, max_attempts: int, retry_interval: float = 1
-) -> dict | None:
-    async with aiohttp.ClientSession() as session:
-        attempt_idx = 0
-
-        def _log(level: int, msg: str, exc_info: bool | None = None, **kwargs) -> None:
-            log_data = {
-                "url": url,
-                "attempt": attempt_idx + 1,
-                "max_attempts": max_attempts,
-                "retry_interval": retry_interval,
-                **kwargs,
-            }
-            LOG.log(
-                level,
-                msg + " - %s",
-                " ".join(f"{k}:{v}" for k, v in log_data.items()),
-                exc_info=exc_info,
-            )
-
-        while True:
-            try:
-                async with session.get(url) as resp:
-                    resp.raise_for_status()
-                    ip_info_data = await resp.json()
-                    _log(level=logging.DEBUG, msg="IP info fetched", data=ip_info_data)
-                    return ip_info_data
-            except Exception as e:
-                if max_attempts == -1 or attempt_idx < (max_attempts - 1):
-                    _log(
-                        level=logging.WARNING,
-                        msg="IP info request failed",
-                        error=e,
-                    )
-                    await asyncio.sleep(retry_interval)
-                    attempt_idx += 1
-                else:
-                    _log(
-                        level=logging.ERROR,
-                        msg="IP info lookup failed",
-                        exc_info=True,
-                    )
-                    return None
 
 
 def run(
