@@ -2,15 +2,11 @@
 
 import asyncio
 import json
-import logging
 import os
 import time
 import uuid
-from datetime import datetime, timezone
-from functools import cache, lru_cache
 from typing import Annotated, Any
 
-import aiohttp
 import cyclopts
 from zerobus.sdk import StreamConfigurationOptions, TableProperties
 from zerobus.sdk.aio import ZerobusStream
@@ -100,7 +96,7 @@ async def _run(
 
     try:
         ip_info_data = (
-            await ip_info_service.get(
+            await ip_info.get(
                 client_options.metadata_ip_info_url,
                 client_options.metadata_ip_info_attempts,
                 client_options.metadata_ip_info_retry_interval,

@@ -4,7 +4,6 @@ import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from urllib.parse import urlparse
