@@ -44,7 +44,7 @@ async def _log_client_summary_periodically(
             frames_consumed = sum(r.consume_count for r in cam_readers)
             reader_count = len(cam_readers)
             LOG.info(
-                "Client summary"
+                "Client summary - "
                 "run_time=%.1fs "
                 "readers:%s "
                 "frames_produced=%d "
