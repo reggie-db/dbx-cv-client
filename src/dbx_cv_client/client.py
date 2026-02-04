@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
-from functools import cache
+from functools import cache, lru_cache
 from typing import Annotated, Any
 
 import aiohttp
@@ -18,13 +18,13 @@ from zerobus.sdk.shared import OAuthHeadersProvider, zerobus_service_pb2_grpc
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
-from dbx_cv_client.options import ClientOptions, MerakiOptions, WorkspaceOptions
+from dbx_cv_client.options import CamReaderOptions, MerakiOptions, WorkspaceOptions
 
 LOG = logger(__name__)
 
 
 async def _log_client_summary_periodically(
-    client_options: ClientOptions,
+    client_options: CamReaderOptions,
     start_time: float,
     stop: asyncio.Event,
     cam_readers: list[CamReader],
@@ -87,7 +87,7 @@ async def _run_cam_reader(
 
 async def _run(
     workspace_options: WorkspaceOptions,
-    client_options: ClientOptions,
+    client_options: CamReaderOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
     cam_readers: list[CamReader],
@@ -98,8 +98,11 @@ async def _run(
     stream = await _create_stream(workspace_options)
 
     try:
-        ip_info_data = await ip_info()
-        ip_address = ip_info_data.get("ip", None) if ip_info_data else None
+        ip_info_data = (
+            await ip_info(client_options.metadata_ip_info_url)
+            if client_options.metadata_ip_info_url
+            else None
+        )
         start_monotonic = time.monotonic()
         # Mutable container to share ingested count with the periodic logger task.
         ingested_count_ref: list[int] = [0]
@@ -132,8 +135,9 @@ async def _run(
                                 "source": cam_reader.source,
                                 "fps": cam_reader.client_options.fps,
                                 "scale": cam_reader.client_options.scale,
-                                "ip_address": ip_address,
                             }
+                            if ip_info_data:
+                                metadata["ip_info"] = ip_info_data
                             if cam_reader.device_info:
                                 metadata["device_info"] = cam_reader.device_info
                             metadata_json = json.dumps(metadata)
@@ -223,10 +227,10 @@ async def _create_stream(
     return stream
 
 
-@cache
-async def ip_info(max_attempts: int = 3) -> dict | None:
-    url = "https://ipwho.is/"
-    retry_seconds = 1
+@lru_cache(maxsize=None)
+async def ip_info(
+    url: str, max_attempts: int = 3, retry_interval: float = 1
+) -> dict | None:
     async with aiohttp.ClientSession() as session:
         attempt = 0
         while True:
@@ -238,9 +242,9 @@ async def ip_info(max_attempts: int = 3) -> dict | None:
                 if attempt < max_attempts:
                     attempt += 1
                     LOG.warning(
-                        f"Failed to fetch IP info, retrying in {retry_seconds} second{'s' if retry_seconds > 1 else ''}: {url}"
+                        f"Failed to fetch IP info, retrying in {retry_interval} second{'s' if retry_interval > 1 else ''}: {url}"
                     )
-                    await asyncio.sleep(retry_seconds)
+                    await asyncio.sleep(retry_interval)
                 else:
                     LOG.warning("Failed to fetch IP info", exc_info=True)
                     return None
@@ -248,7 +252,7 @@ async def ip_info(max_attempts: int = 3) -> dict | None:
 
 def run(
     workspace_options: WorkspaceOptions,
-    client_options: ClientOptions = ClientOptions(),
+    client_options: CamReaderOptions = CamReaderOptions(),
     meraki_options: MerakiOptions | None = None,
     sources: Annotated[
         list[str] | None,

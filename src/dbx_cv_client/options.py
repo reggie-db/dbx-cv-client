@@ -121,9 +121,11 @@ class WorkspaceOptions:
         return f"{prefix}.cloud.databricks.com"
 
 
-@cyclopts.Parameter(name="*")
+@cyclopts.Parameter(
+    name="*",
+)
 @dataclass
-class ClientOptions:
+class CamReaderOptions:
     flush_interval: Annotated[
         float | None,
         cyclopts.Parameter(
@@ -181,6 +183,14 @@ class ClientOptions:
             help="Sends a frame multiple times",
         ),
     ] = None
+
+    metadata_ip_info_url: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            env_var="METADATA_IP_INFO_URL",
+            help="Append IP Info to metadata using this URL",
+        ),
+    ] = "https://ipwho.is/"
 
 
 @dataclass

@@ -22,7 +22,7 @@ async def test_meraki_reader(
 ):
     """Run MerakiReader test against mock server."""
     from dbx_cv_client.cam_reader.meraki_reader import MerakiReader
-    from dbx_cv_client.options import ClientOptions, MerakiOptions
+    from dbx_cv_client.options import CamReaderOptions, MerakiOptions
     from tests import mock_meraki_server
 
     LOG.info("MerakiReader Test")
@@ -60,7 +60,7 @@ async def test_meraki_reader(
     )
 
     # ClientOptions configures common reader behavior (fps, scale, etc).
-    client_options = ClientOptions(fps=fps, scale=scale)
+    client_options = CamReaderOptions(fps=fps, scale=scale)
 
     try:
         reader = MerakiReader(

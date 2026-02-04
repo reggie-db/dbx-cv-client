@@ -13,13 +13,13 @@ import cv2
 import numpy as np
 
 from dbx_cv_client import logger
-from dbx_cv_client.options import ClientOptions, MerakiOptions
+from dbx_cv_client.options import CamReaderOptions, MerakiOptions
 
 LOG = logger(__name__)
 
 
 def create_cam_reader(
-    client_options: ClientOptions,
+    client_options: CamReaderOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
     source: str,
@@ -70,7 +70,7 @@ def create_cam_reader(
 class CamReader(ABC):
     """Base class for camera readers."""
 
-    client_options: ClientOptions
+    client_options: CamReaderOptions
     stop: asyncio.Event
     ready: asyncio.Event
     source: str
