@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import aiohttp
 
 from dbx_cv_client import logger
+from dbx_cv_client.options import CamReaderOptions
 
 LOG = logger(__name__)
 
@@ -21,11 +22,13 @@ _CACHE: dict[str, _Record] = {}
 
 
 async def get(
-    url: str,
-    max_attempts: int | None,
-    retry_interval: float,
+    client_options: CamReaderOptions,
     refresh_interval: timedelta = timedelta(minutes=15),
-) -> dict:
+) -> dict | None:
+    url = client_options.metadata_ip_info_url
+    if not url:
+        return None
+
     def _get():
         cache_record = _CACHE.get(url, None)
         return (
@@ -40,7 +43,11 @@ async def get(
         async with _CACHE_LOCK:
             record = _CACHE.get(url, None)
             if record is None:
-                data = await _fetch_ip_info(url, max_attempts, retry_interval)
+                data = await _fetch_ip_info(
+                    url,
+                    client_options.metadata_ip_info_attempts,
+                    client_options.metadata_ip_info_retry_interval,
+                )
                 record = _Record(fetched_at=datetime.now(), ip_info=data)
                 _CACHE[url] = record
     return record.ip_info

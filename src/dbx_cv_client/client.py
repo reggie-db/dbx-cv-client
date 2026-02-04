@@ -95,15 +95,7 @@ async def _run(
     stream = await _create_stream(workspace_options)
 
     try:
-        ip_info_data = (
-            await ip_info.get(
-                client_options.metadata_ip_info_url,
-                client_options.metadata_ip_info_attempts,
-                client_options.metadata_ip_info_retry_interval,
-            )
-            if client_options.metadata_ip_info_url
-            else None
-        )
+        ip_info_data = await ip_info.get(client_options)
         start_monotonic = time.monotonic()
         # Mutable container to share ingested count with the periodic logger task.
         ingested_count_ref: list[int] = [0]

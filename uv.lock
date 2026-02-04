@@ -377,7 +377,7 @@ wheels = [
 
 [[package]]
 name = "dbx-cv-client"
-version = "0.0.1+g0f354d6"
+version = "0.0.1+gc8b608d"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

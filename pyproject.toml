@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbx-cv-client"
-version = "0.0.1+g54c85f6"
+version = "0.0.1+gc8b608d"
 description = "CLI client for streaming data to Databricks ingestion tables"
 readme = "README.md"
 requires-python = ">=3.12"
