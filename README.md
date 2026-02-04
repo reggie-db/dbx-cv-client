@@ -156,5 +156,3 @@ uv run pytest
 uv pip install -e ".[dev]"
 uv run pytest
 ```
-
-Note: The Meraki reader test expects a JPEG file at `./test_image.jpg` (repo root) to seed the mock server response.

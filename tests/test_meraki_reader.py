@@ -6,9 +6,12 @@ This test starts an aiohttp server on an ephemeral port inside the test process.
 
 import argparse
 import asyncio
-from pathlib import Path
 
 from aiohttp import web
+
+from dbx_cv_client import logger
+
+LOG = logger(__name__)
 
 
 async def test_meraki_reader(
@@ -22,17 +25,23 @@ async def test_meraki_reader(
     from dbx_cv_client.options import ClientOptions, MerakiOptions
     from tests import mock_meraki_server
 
-    print("MerakiReader Test")
-    print("=" * 50)
-    print(f"Device serial: {device_serial}")
-    print(f"FPS: {fps}")
-    print(f"Scale: {scale}")
-    print(f"Frames to capture: {num_frames}")
-    print("=" * 50)
-    print()
+    LOG.info("MerakiReader Test")
+    LOG.info("=" * 50)
+    LOG.info(f"Device serial: {device_serial}")
+    LOG.info(f"FPS: {fps}")
+    LOG.info(f"Scale: {scale}")
+    LOG.info(f"Frames to capture: {num_frames}")
+    LOG.info("=" * 50)
 
     # Start the mock Meraki server in-process on an ephemeral port.
-    mock_meraki_server._image_data = Path("test_image.jpg").read_bytes()
+    # Seed the mock server with a minimal valid JPEG to ensure MerakiReader can decode it.
+    import cv2
+    import numpy as np
+
+    ok, buf = cv2.imencode(".jpg", np.zeros((1, 1, 3), dtype=np.uint8))
+    if not ok:
+        raise RuntimeError("Failed to encode test JPEG")
+    mock_meraki_server._image_data = buf.tobytes()
     mock_meraki_server._fail_probability = 0.0
     mock_meraki_server._min_failures = 0
     runner = web.AppRunner(mock_meraki_server.create_app())
@@ -62,22 +71,21 @@ async def test_meraki_reader(
             source=device_serial,
         )
 
-        print("Capturing frames...")
-        print("-" * 50)
+        LOG.info("Capturing frames...")
+        LOG.info("-" * 50)
 
         frame_count = 0
         async for frame in reader._read():
             frame_count += 1
-            print(f"[Frame {frame_count}] Received {len(frame)} bytes")
+            LOG.info(f"[Frame {frame_count}] Received {len(frame)} bytes")
 
             if frame_count >= num_frames:
-                print("-" * 50)
-                print(f"Captured {num_frames} frames, stopping")
+                LOG.info("-" * 50)
+                LOG.info(f"Captured {num_frames} frames, stopping")
                 stop_event.set()
                 break
 
-        print()
-        print("Test completed successfully!")
+        LOG.info("Test completed successfully!")
     finally:
         await runner.cleanup()
 

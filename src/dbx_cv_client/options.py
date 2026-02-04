@@ -4,7 +4,7 @@ import ipaddress
 import os
 import socket
 from dataclasses import dataclass
-from functools import cache, lru_cache
+from functools import lru_cache
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 

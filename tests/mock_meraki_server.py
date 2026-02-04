@@ -13,6 +13,10 @@ from pathlib import Path
 
 from aiohttp import web
 
+from dbx_cv_client import logger
+
+LOG = logger(__name__)
+
 # Module state
 _image_data: bytes = b""
 _fail_probability: float = 0.5
@@ -36,8 +40,8 @@ async def handle_generate_snapshot(request: web.Request) -> web.Response:
     # Initialize request count for this URL
     _request_counts[image_url] = 0
 
-    print(f"[Snapshot Request] Serial: {serial}")
-    print(f"  -> Image URL: {image_url}")
+    LOG.info(f"[Snapshot Request] Serial: {serial}")
+    LOG.info(f"  -> Image URL: {image_url}")
 
     return web.json_response(
         {
@@ -50,6 +54,7 @@ async def handle_generate_snapshot(request: web.Request) -> web.Response:
 async def handle_device_info(request: web.Request) -> web.Response:
     """Handle GET /devices/{serial} used by MerakiReader device info lookup."""
     serial = request.match_info.get("serial", "unknown")
+    LOG.info(f"[Device Info Request] Serial: {serial}")
     return web.json_response(
         {
             "serial": serial,
@@ -83,15 +88,15 @@ async def handle_snapshot_image(request: web.Request) -> web.Response:
 
     # Always fail for the first few attempts
     if attempt <= _min_failures:
-        print(f"[Image Request] Attempt {attempt}: 404 (forced)")
+        LOG.info(f"[Image Request] Attempt {attempt}: 404 (forced)")
         return web.Response(status=404, text="Image not ready")
 
     # After minimum failures, randomly decide
     if random.random() < _fail_probability:
-        print(f"[Image Request] Attempt {attempt}: 404 (random)")
+        LOG.info(f"[Image Request] Attempt {attempt}: 404 (random)")
         return web.Response(status=404, text="Image not ready")
 
-    print(f"[Image Request] Attempt {attempt}: 200 ({len(_image_data)} bytes)")
+    LOG.info(f"[Image Request] Attempt {attempt}: 200 ({len(_image_data)} bytes)")
     return web.Response(
         body=_image_data,
         content_type="image/jpeg",
@@ -160,22 +165,22 @@ def main():
     _fail_probability = args.fail_prob
     _min_failures = args.min_fails
 
-    print("Mock Meraki API Server")
-    print("=" * 50)
-    print(f"Image: {args.image_path} ({len(_image_data)} bytes)")
-    print(f"Fail probability: {_fail_probability}")
-    print(f"Min failures: {_min_failures}")
-    print("=" * 50)
-    print()
-    print("Endpoints:")
-    print(
+    LOG.info("Mock Meraki API Server")
+    LOG.info("=" * 50)
+    LOG.info(f"Image: {args.image_path} ({len(_image_data)} bytes)")
+    LOG.info(f"Fail probability: {_fail_probability}")
+    LOG.info(f"Min failures: {_min_failures}")
+    LOG.info("=" * 50)
+    LOG.info()
+    LOG.info("Endpoints:")
+    LOG.info(
         f"  POST http://{args.host}:{args.port}/devices/{{serial}}/camera/generateSnapshot"
     )
-    print(f"  GET  http://{args.host}:{args.port}/snapshot/{{serial}}/{{id}}.jpg")
-    print()
-    print(f"Starting server on http://{args.host}:{args.port}")
-    print("Press Ctrl+C to stop")
-    print()
+    LOG.info(f"  GET  http://{args.host}:{args.port}/snapshot/{{serial}}/{{id}}.jpg")
+    LOG.info()
+    LOG.info(f"Starting server on http://{args.host}:{args.port}")
+    LOG.info("Press Ctrl+C to stop")
+    LOG.info()
 
     app = create_app()
     web.run_app(app, host=args.host, port=args.port, print=None)

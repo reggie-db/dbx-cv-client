@@ -6,8 +6,10 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
+from functools import cache
 from typing import Annotated, Any
 
+import aiohttp
 import cyclopts
 from zerobus.sdk import StreamConfigurationOptions, TableProperties
 from zerobus.sdk.aio import ZerobusStream
@@ -96,7 +98,8 @@ async def _run(
     stream = await _create_stream(workspace_options)
 
     try:
-        start_time = datetime.now(timezone.utc)
+        ip_info_data = await ip_info()
+        ip_address = ip_info_data.get("ip", None) if ip_info_data else None
         start_monotonic = time.monotonic()
         # Mutable container to share ingested count with the periodic logger task.
         ingested_count_ref: list[int] = [0]
@@ -129,13 +132,20 @@ async def _run(
                                 "source": cam_reader.source,
                                 "fps": cam_reader.client_options.fps,
                                 "scale": cam_reader.client_options.scale,
+                                "ip_address": ip_address,
                             }
                             if cam_reader.device_info:
                                 metadata["device_info"] = cam_reader.device_info
+                            metadata_json = json.dumps(metadata)
+                            LOG.debug(
+                                "Ingesting frame from %s - metadata:%s",
+                                cam_reader,
+                                metadata_json,
+                            )
                             record = record_pb2.Raw(
                                 id=str(uuid.uuid4()),
                                 timestamp=(time.time_ns() // 1_000),
-                                metadata=json.dumps(metadata),
+                                metadata=metadata_json,
                                 content=frame,
                             )
                             # Once this returns, the record is queued for ingestion.
@@ -211,6 +221,29 @@ async def _create_stream(
 
     await stream._initialize()
     return stream
+
+
+@cache
+async def ip_info(max_attempts: int = 3) -> dict | None:
+    url = "https://ipwho.is/"
+    retry_seconds = 1
+    async with aiohttp.ClientSession() as session:
+        attempt = 0
+        while True:
+            try:
+                async with session.get(url) as resp:
+                    resp.raise_for_status()
+                    return await resp.json()
+            except Exception:
+                if attempt < max_attempts:
+                    attempt += 1
+                    LOG.warning(
+                        f"Failed to fetch IP info, retrying in {retry_seconds} second{'s' if retry_seconds > 1 else ''}: {url}"
+                    )
+                    await asyncio.sleep(retry_seconds)
+                else:
+                    LOG.warning("Failed to fetch IP info", exc_info=True)
+                    return None
 
 
 def run(

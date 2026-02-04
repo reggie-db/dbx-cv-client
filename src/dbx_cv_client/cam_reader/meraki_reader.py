@@ -1,8 +1,9 @@
 """Meraki camera reader for capturing snapshots via the Dashboard API."""
 
 import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterable
+from typing import Any, AsyncIterator
 
 import aiohttp
 import cv2
@@ -10,71 +11,62 @@ import numpy as np
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader
-from dbx_cv_client.options import ClientOptions, MerakiOptions
+from dbx_cv_client.options import MerakiOptions
 
 LOG = logger(__name__)
 
 
+@dataclass(kw_only=True)
 class MerakiReader(CamReader):
     """Async reader for capturing snapshots from Meraki cameras."""
 
-    def __init__(
-        self,
-        client_options: ClientOptions,
-        meraki_options: MerakiOptions,
-        stop: asyncio.Event,
-        ready: asyncio.Event,
-        source: str,
-        stream_id: str | None = None,
-    ):
-        super().__init__(client_options, stop, ready, source, stream_id)
+    meraki_options: MerakiOptions
 
-        self.meraki_options = meraki_options
-        self._session: aiohttp.ClientSession | None = None
-        self._device_info: dict | None = None
-        self._device_info_fetched: bool = False
+    _device_info_lock: asyncio.Lock = field(init=False, default_factory=asyncio.Lock)
 
-    @property
-    def device_info(self) -> dict | None:
-        """Device info from Meraki API (fetched once on first read)."""
-        return self._device_info
-
-    async def _read(self) -> AsyncIterable[bytes]:
+    async def _read(self) -> AsyncIterator[bytes]:
         """Yield camera frames at the configured FPS rate."""
         fps = self.client_options.fps
-        frame_interval = 1.0 / fps if fps > 0 else 1.0
-
-        # Fetch device info once on first read
-        if not self._device_info_fetched:
-            await self._fetch_device_info()
-            self._device_info_fetched = True
-
+        frame_interval = 1.0 / fps
+        session = aiohttp.ClientSession(
+            headers={
+                "X-Cisco-Meraki-API-Key": await self.meraki_options.cisco_meraki_api_key(),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+        )
         try:
+            # Fetch device info on the first read
+            if self._device_info is None:
+                async with self._device_info_lock:
+                    if self._device_info is None:
+                        self._device_info = await self._fetch_device_info(session)
+
             while not self.stop.is_set():
                 start_time = asyncio.get_event_loop().time()
 
-                data, img = await self._request_snapshot()
+                data, img = await self._request_snapshot(session)
                 yield self._resize_image(img) or data
 
                 elapsed = asyncio.get_event_loop().time() - start_time
-                sleep_time = max(0, frame_interval - elapsed)
+                sleep_time = max(0, int(frame_interval - elapsed))
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
         finally:
-            if self._session and not self._session.closed:
-                await self._session.close()
+            if not session.closed:
+                await session.close()
 
     async def _request_snapshot(
         self,
+        session: aiohttp.ClientSession,
         timestamp: str | None = None,
-        fullframe: bool = True,
+        full_frame: bool = True,
         max_retries: int = 20,
         retry_delay: float = 1.0,
     ) -> tuple[bytes, np.ndarray]:
         """Request a snapshot and poll until ready."""
-        session = await self._get_session()
 
-        payload: dict[str, Any] = {"fullframe": fullframe}
+        payload: dict[str, Any] = {"fullframe": full_frame}
         if timestamp is not None:
             payload["timestamp"] = timestamp
 
@@ -142,56 +134,24 @@ class MerakiReader(CamReader):
                 LOG.debug(f"Unexpected status {img_resp.status}")
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
-    def _resize_image(self, img: np.ndarray) -> bytes | None:
-        scale = self.client_options.scale
-        if not scale:
-            return None
-
-        h, w = img.shape[:2]
-        if h == scale:
-            return None
-
-        new_h = scale
-        new_w = int(w * (new_h / h))
-
-        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        ok, buf = cv2.imencode(".jpg", resized)
-        if not ok:
-            raise ValueError("Failed to encode image")
-
-        return buf.tobytes()
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session."""
-        if self._session is None or self._session.closed:
-            LOG.info(f"Creating Meraki session: {self}")
-            self._session = aiohttp.ClientSession(
-                headers={
-                    "X-Cisco-Meraki-API-Key": await self.meraki_options.cisco_meraki_api_key(),
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                }
-            )
-        return self._session
-
-    async def _fetch_device_info(self, max_retries: int = 3) -> None:
+    async def _fetch_device_info(
+        self, session: aiohttp.ClientSession, max_retries: int = 3
+    ) -> dict:
         """Fetch device info from Meraki API (one-time, with retries)."""
-        session = await self._get_session()
         url = f"{self.meraki_options.api_base_url}/devices/{self.source}"
-
         for attempt in range(max_retries):
             try:
                 async with session.get(
                     url, timeout=aiohttp.ClientTimeout(total=30)
                 ) as resp:
                     if resp.status // 100 == 2:
-                        self._device_info = await resp.json()
+                        device_info = await resp.json()
                         LOG.info(
-                            f"Device info fetched: name={self._device_info.get('name')}, "
-                            f"model={self._device_info.get('model')}, "
-                            f"serial={self._device_info.get('serial')}"
+                            f"Device info fetched: name={device_info.get('name')}, "
+                            f"model={device_info.get('model')}, "
+                            f"serial={device_info.get('serial')}"
                         )
-                        return
+                        return device_info
                     error_text = await resp.text()
                     LOG.warning(
                         f"Device info request failed (attempt {attempt + 1}/{max_retries}): "
@@ -208,3 +168,4 @@ class MerakiReader(CamReader):
         LOG.warning(
             f"Failed to fetch device info after {max_retries} attempts, continuing without it"
         )
+        return {}

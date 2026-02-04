@@ -4,8 +4,13 @@ import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import AsyncIterable
+from collections.abc import AsyncIterable
+from dataclasses import dataclass, field
+from typing import AsyncIterator
 from urllib.parse import urlparse
+
+import cv2
+import numpy as np
 
 from dbx_cv_client import logger
 from dbx_cv_client.options import ClientOptions, MerakiOptions
@@ -61,55 +66,59 @@ def create_cam_reader(
     )
 
 
+@dataclass(kw_only=True)
 class CamReader(ABC):
     """Base class for camera readers."""
 
-    def __init__(
-        self,
-        client_options: ClientOptions,
-        stop: asyncio.Event,
-        ready: asyncio.Event,
-        source: str,
-        stream_id: str | None = None,
-    ):
-        self.client_options = client_options
-        self.stop = stop
-        self.ready = ready
-        self.source = source
-        if not source:
-            raise ValueError("source required")
-        self._stream_id = stream_id
-        self._frame: bytes | None = None
-        self.produce_count = 0
-        self.consume_count = 0
+    client_options: ClientOptions
+    stop: asyncio.Event
+    ready: asyncio.Event
+    source: str
+    stream_id: str | None = None
+
+    # Internal state and counters.
+    produce_count: int = field(init=False, default=0)
+    consume_count: int = field(init=False, default=0)
+    _frame: bytes | None = field(init=False, default=None)
+    _device_info: dict | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        """
+        Initialize internal state after dataclass construction.
+
+        This preserves the original `__init__` validation and internal attribute layout.
+        """
+        if not self.stream_id:
+            try:
+                parsed = urlparse(self.source)
+                path = parsed.path or ""
+                parts = [p for p in path.split("/") if p]
+                if parts:
+                    joined = "_".join(parts)
+                    cleaned = re.sub(r"[^0-9A-Za-z]+", "_", joined)
+                    if cleaned:
+                        self.stream_id = cleaned
+                    else:
+                        self.stream_id = self.source
+            except Exception:
+                pass
 
     @property
-    def stream_id(self) -> str:
-        if self._stream_id:
-            return self._stream_id
-        try:
-            parsed = urlparse(self.source)
-            path = parsed.path or ""
-            parts = [p for p in path.split("/") if p]
-            if parts:
-                joined = "_".join(parts)
-                cleaned = re.sub(r"[^0-9A-Za-z]+", "_", joined)
-                return cleaned or self.source
-        except Exception:
-            pass
-
-        return self.source
-
-    @property
-    def device_info(self) -> dict | None:
+    def device_info(self) -> dict:
         """Device info from source API (if available)."""
-        return None
+        return self._device_info or {}
 
     async def run(self) -> None:
         """Run the reader, setting ready event when frames are available."""
+        LOG.debug(
+            "Run started %s",
+            self,
+        )
         async for frame in self._read():
             LOG.debug(
-                f"Received frame - stream_id:%s size:%d", self.stream_id, len(frame)
+                "Received frame %s - size:%d ",
+                self,
+                len(frame),
             )
             self._frame = frame
             self.ready.set()
@@ -124,10 +133,29 @@ class CamReader(ABC):
         return None
 
     @abstractmethod
-    async def _read(self) -> AsyncIterable[bytes]:
+    def _read(self) -> AsyncIterator[bytes]:
         """Yield frames from the camera source."""
         ...
 
+    def _resize_image(self, img: np.ndarray) -> bytes | None:
+        scale = self.client_options.scale
+        if not scale:
+            return None
+
+        h, w = img.shape[:2]
+        if h == scale:
+            return None
+
+        new_h = scale
+        new_w = int(w * (new_h / h))
+
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", resized)
+        if not ok:
+            raise ValueError("Failed to encode image")
+
+        return buf.tobytes()
+
     def __str__(self):
-        redacted = re.sub(r"://.*?@", "://[REDACTED]@", self.source)
-        return f"{type(self).__name__}[{redacted}]"
+        redacted_source = re.sub(r"://.*?@", "://[REDACTED]@", self.source)
+        return f"{type(self).__name__}[{redacted_source}]"
