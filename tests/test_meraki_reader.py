@@ -2,10 +2,12 @@
 
 import argparse
 import asyncio
+from pathlib import Path
+
+from aiohttp import web
 
 
 async def test_meraki_reader(
-    base_url: str = "http://127.0.0.1:8089",
     num_frames: int = 3,
     fps: int = 1,
     scale: int = 0,
@@ -13,17 +15,28 @@ async def test_meraki_reader(
 ):
     """Run MerakiReader test against mock server."""
     from dbx_cv_client.cam_reader.meraki_reader import MerakiReader
-    from dbx_cv_client.options import MerakiOptions
+    from dbx_cv_client.options import ClientOptions, MerakiOptions
+    from tests import mock_meraki_server
 
     print("MerakiReader Test")
     print("=" * 50)
-    print(f"Server: {base_url}")
     print(f"Device serial: {device_serial}")
     print(f"FPS: {fps}")
     print(f"Scale: {scale}")
     print(f"Frames to capture: {num_frames}")
     print("=" * 50)
     print()
+
+    # Start the mock Meraki server in-process on an ephemeral port.
+    mock_meraki_server._image_data = Path("test_image.jpg").read_bytes()
+    mock_meraki_server._fail_probability = 0.0
+    mock_meraki_server._min_failures = 0
+    runner = web.AppRunner(mock_meraki_server.create_app())
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    base_url = f"http://127.0.0.1:{port}"
 
     stop_event = asyncio.Event()
     ready_event = asyncio.Event()
@@ -33,31 +46,36 @@ async def test_meraki_reader(
         api_token="test-api-token",
     )
 
-    reader = MerakiReader(
-        meraki_options=meraki_options,
-        stop=stop_event,
-        ready=ready_event,
-        fps=fps,
-        scale=scale,
-        source=device_serial,
-    )
+    # ClientOptions configures common reader behavior (fps, scale, etc).
+    client_options = ClientOptions(fps=fps, scale=scale)
 
-    print("Capturing frames...")
-    print("-" * 50)
+    try:
+        reader = MerakiReader(
+            client_options=client_options,
+            meraki_options=meraki_options,
+            stop=stop_event,
+            ready=ready_event,
+            source=device_serial,
+        )
 
-    frame_count = 0
-    async for frame in reader._read():
-        frame_count += 1
-        print(f"[Frame {frame_count}] Received {len(frame)} bytes")
+        print("Capturing frames...")
+        print("-" * 50)
 
-        if frame_count >= num_frames:
-            print("-" * 50)
-            print(f"Captured {num_frames} frames, stopping")
-            stop_event.set()
-            break
+        frame_count = 0
+        async for frame in reader._read():
+            frame_count += 1
+            print(f"[Frame {frame_count}] Received {len(frame)} bytes")
 
-    print()
-    print("Test completed successfully!")
+            if frame_count >= num_frames:
+                print("-" * 50)
+                print(f"Captured {num_frames} frames, stopping")
+                stop_event.set()
+                break
+
+        print()
+        print("Test completed successfully!")
+    finally:
+        await runner.cleanup()
 
 
 def main():

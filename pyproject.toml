@@ -4,27 +4,34 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbx-cv-client"
-version = "0.1.0"
+version = "0.0.1+gf215cce"
 description = "CLI client for streaming data to Databricks ingestion tables"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "aiohttp",
-  "azure-identity",
-  "azure-keyvault-secrets",
-  "databricks-zerobus-ingest-sdk",
-  "grpcio-tools>=1.60.0,<2.0",
-  "numpy",
-  "opencv-python-headless",
-  "pyaml",
-  "typer",
+    "aiohttp",
+    "azure-identity",
+    "azure-keyvault-secrets",
+    "databricks-zerobus-ingest-sdk",
+    "grpcio-tools>=1.60.0,<2.0",
+    "numpy",
+    "opencv-python-headless",
+    "pyaml",
+    "cyclopts",
 ]
 
 [project.scripts]
 dbx-cv-client = "dbx_cv_client.cli:app"
 
-[project.optional-dependencies]
-dev = ["pytest"]
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "lfp_build @ git+https://github.com/regbo/lfp-build-py.git",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.uv]
 package = true

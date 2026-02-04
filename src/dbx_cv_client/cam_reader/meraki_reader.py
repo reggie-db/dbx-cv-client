@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timezone
-from typing import AsyncIterable
+from typing import Any, AsyncIterable
 
 import aiohttp
 import cv2
@@ -10,7 +10,7 @@ import numpy as np
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader
-from dbx_cv_client.options import MerakiOptions
+from dbx_cv_client.options import ClientOptions, MerakiOptions
 
 LOG = logger(__name__)
 
@@ -20,15 +20,14 @@ class MerakiReader(CamReader):
 
     def __init__(
         self,
+        client_options: ClientOptions,
         meraki_options: MerakiOptions,
         stop: asyncio.Event,
         ready: asyncio.Event,
-        fps: int,
-        scale: int,
         source: str,
         stream_id: str | None = None,
     ):
-        super().__init__(stop, ready, fps, scale, source, stream_id)
+        super().__init__(client_options, stop, ready, source, stream_id)
 
         self.meraki_options = meraki_options
         self._session: aiohttp.ClientSession | None = None
@@ -42,7 +41,8 @@ class MerakiReader(CamReader):
 
     async def _read(self) -> AsyncIterable[bytes]:
         """Yield camera frames at the configured FPS rate."""
-        frame_interval = 1.0 / self.fps if self.fps > 0 else 1.0
+        fps = self.client_options.fps
+        frame_interval = 1.0 / fps if fps > 0 else 1.0
 
         # Fetch device info once on first read
         if not self._device_info_fetched:
@@ -74,7 +74,7 @@ class MerakiReader(CamReader):
         """Request a snapshot and poll until ready."""
         session = await self._get_session()
 
-        payload = {"fullframe": fullframe}
+        payload: dict[str, Any] = {"fullframe": fullframe}
         if timestamp is not None:
             payload["timestamp"] = timestamp
 
@@ -143,14 +143,15 @@ class MerakiReader(CamReader):
         raise TimeoutError(f"Snapshot not ready after {max_retries} attempts")
 
     def _resize_image(self, img: np.ndarray) -> bytes | None:
-        if not self.scale:
+        scale = self.client_options.scale
+        if not scale:
             return None
 
         h, w = img.shape[:2]
-        if h == self.scale:
+        if h == scale:
             return None
 
-        new_h = self.scale
+        new_h = scale
         new_w = int(w * (new_h / h))
 
         resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)

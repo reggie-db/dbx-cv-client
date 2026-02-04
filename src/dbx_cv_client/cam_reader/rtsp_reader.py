@@ -6,6 +6,7 @@ from typing import AsyncIterable
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader
+from dbx_cv_client.options import ClientOptions
 
 _MAX_BUFFER_SIZE = 2 * 1024 * 1024  # 2MB safety cap
 _JPEG_START = b"\xff\xd8"
@@ -13,7 +14,6 @@ _JPEG_END = b"\xff\xd9"
 _RESTART_DELAY = 5.0
 _FRAME_TIMEOUT = 15.0
 _INITIAL_FRAME_TIMEOUT = 30.0
-
 
 LOG = logger(__name__)
 
@@ -23,17 +23,14 @@ class RTSPReader(CamReader):
 
     def __init__(
         self,
+        client_options: ClientOptions,
         stop: asyncio.Event,
         ready: asyncio.Event,
-        fps: int,
-        scale: int,
         source: str,
         stream_id: str | None = None,
-        rtsp_ffmpeg_args: list[str] | None = None,
     ):
-        super().__init__(stop, ready, fps, scale, source, stream_id)
+        super().__init__(client_options, stop, ready, source, stream_id)
         self.buffer = b""
-        self.rtsp_ffmpeg_args = rtsp_ffmpeg_args
         self._rtsp_ffmpeg_process: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task | None = None
 
@@ -121,8 +118,8 @@ class RTSPReader(CamReader):
         cmds = [
             "ffmpeg",
         ]
-        if self.rtsp_ffmpeg_args:
-            cmds.extend(self.rtsp_ffmpeg_args)
+        if rtsp_ffmpeg_args := self.client_options.rtsp_ffmpeg_args:
+            cmds.extend(rtsp_ffmpeg_args)
         cmds.extend(
             [
                 ("-loglevel", "error"),
@@ -136,7 +133,10 @@ class RTSPReader(CamReader):
                 ("-rtsp_flags", "prefer_tcp"),
                 ("-reorder_queue_size", "0"),
                 ("-i", self.source),
-                ("-vf", f"fps={self.fps},scale=-1:{self.scale},format=yuvj420p"),
+                (
+                    "-vf",
+                    f"fps={self.client_options.fps},scale=-1:{self.client_options.scale},format=yuvj420p",
+                ),
                 ("-pix_fmt", "yuvj420p"),
                 ("-q:v", "7"),
                 ("-threads", "1"),

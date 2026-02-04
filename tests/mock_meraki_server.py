@@ -40,6 +40,18 @@ async def handle_generate_snapshot(request: web.Request) -> web.Response:
     )
 
 
+async def handle_device_info(request: web.Request) -> web.Response:
+    """Handle GET /devices/{serial} used by MerakiReader device info lookup."""
+    serial = request.match_info.get("serial", "unknown")
+    return web.json_response(
+        {
+            "serial": serial,
+            "name": f"Mock Camera {serial}",
+            "model": "MOCK-MODEL-1",
+        }
+    )
+
+
 async def handle_snapshot_image(request: web.Request) -> web.Response:
     """
     Handle GET /snapshot/{serial}/{snapshot_id}.jpg.
@@ -85,6 +97,10 @@ def create_app() -> web.Application:
     app.router.add_post(
         "/devices/{serial}/camera/generateSnapshot",
         handle_generate_snapshot,
+    )
+    app.router.add_get(
+        "/devices/{serial}",
+        handle_device_info,
     )
     app.router.add_get(
         "/snapshot/{serial}/{snapshot_id}.jpg",

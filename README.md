@@ -1,6 +1,6 @@
 # dbx-cv-client
 
-CLI client for streaming camera frames to Databricks ingestion tables via the Zerobus SDK. Supports RTSP streams (via FFmpeg) and Meraki camera snapshots.
+CLI client for streaming camera frames to Databricks ingestion tables via the Zerobus SDK. Supports RTSP streams (via FFmpeg), Meraki camera snapshots, and local image directories for testing/replay.
 
 ## Prerequisites
 
@@ -65,10 +65,15 @@ dbx-cv-client client \
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
-| `--source` | `SOURCES` | | Camera source (RTSP URL or Meraki serial) |
-| `--fps` | `FPS` | `1` | Frames per second |
+| `--source` | `SOURCES` | | Camera source (RTSP URL, Meraki serial, or directory path) |
+| `--fps` | `FPS` | `1` | Frames per second (directory defaults to 5) |
 | `--scale` | `SCALE` | `1080` | Image height in pixels |
 | `--frame-multiplier` | `FRAME_MULTIPLIER` | `0` | Send each frame N extra times |
+
+Source type is auto-detected:
+- **Directory**: Local path to a folder containing images (`.jpg`, `.png`, `.bmp`, `.gif`, `.webp`, `.tiff`)
+- **RTSP**: URL starting with `rtsp://` or `rtsps://`
+- **Meraki**: Any other string (treated as device serial)
 
 #### Meraki Options
 
@@ -114,13 +119,28 @@ dbx-cv-client client \
   --table-name "$DATABRICKS_TABLE_NAME"
 ```
 
+#### Directory (Testing/Replay)
+
+```bash
+dbx-cv-client client \
+  --source "./sample_images" \
+  --fps 5 \
+  --host "$DATABRICKS_HOST" \
+  --region "$DATABRICKS_REGION" \
+  --client-id "$DATABRICKS_CLIENT_ID" \
+  --client-secret "$DATABRICKS_CLIENT_SECRET" \
+  --table-name "$DATABRICKS_TABLE_NAME"
+```
+
+Images are shuffled and emitted at the configured FPS (default 5), looping when exhausted.
+
 #### Multiple Sources
 
 ```bash
 dbx-cv-client client \
   --source "rtsp://cam1.local:554/stream" \
   --source "MERAKI-SERIAL-001" \
-  --source "MERAKI-SERIAL-002"
+  --source "./test_images"
 ```
 
 ## Development

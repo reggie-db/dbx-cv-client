@@ -1,53 +1,64 @@
 """Camera reader base class and factory for creating readers."""
 
 import asyncio
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import AsyncIterable
 from urllib.parse import urlparse
 
 from dbx_cv_client import logger
-from dbx_cv_client.options import MerakiOptions
+from dbx_cv_client.options import ClientOptions, MerakiOptions
 
 LOG = logger(__name__)
 
 
 def create_cam_reader(
+    client_options: ClientOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
-    fps: int,
-    scale: int,
     source: str,
     stream_id: str | None = None,
     meraki_options: MerakiOptions | None = None,
-    rtsp_ffmpeg_args: list[str] | None = None,
 ) -> "CamReader":
+    # Directory source - replay local images
+    if os.path.isdir(source):
+        from dbx_cv_client.cam_reader.directory_reader import DirectoryReader
+
+        LOG.info(f"Creating directory reader for source: {source}")
+        return DirectoryReader(
+            client_options=client_options,
+            stop=stop,
+            ready=ready,
+            source=source,
+            stream_id=stream_id,
+        )
+
+    # RTSP/RTSPS source - stream via FFmpeg
     if re.match(r"^rtsps?://", source):
         from dbx_cv_client.cam_reader.rtsp_reader import RTSPReader
 
         LOG.info(f"Creating RTSP reader for source: {source}")
         return RTSPReader(
+            client_options=client_options,
             stop=stop,
             ready=ready,
-            fps=fps,
-            scale=scale,
             source=source,
             stream_id=stream_id,
-            rtsp_ffmpeg_args=rtsp_ffmpeg_args,
         )
-    else:
-        from dbx_cv_client.cam_reader.meraki_reader import MerakiReader
 
-        LOG.info(f"Creating Meraki reader for source: {source}")
-        return MerakiReader(
-            meraki_options=meraki_options,
-            stop=stop,
-            ready=ready,
-            fps=fps,
-            scale=scale,
-            source=source,
-            stream_id=stream_id,
-        )
+    # Default to Meraki API source
+    from dbx_cv_client.cam_reader.meraki_reader import MerakiReader
+
+    LOG.info(f"Creating Meraki reader for source: {source}")
+    return MerakiReader(
+        meraki_options=meraki_options,
+        stop=stop,
+        ready=ready,
+        client_options=client_options,
+        source=source,
+        stream_id=stream_id,
+    )
 
 
 class CamReader(ABC):
@@ -55,17 +66,15 @@ class CamReader(ABC):
 
     def __init__(
         self,
+        client_options: ClientOptions,
         stop: asyncio.Event,
         ready: asyncio.Event,
-        fps: int,
-        scale: int,
         source: str,
         stream_id: str | None = None,
     ):
+        self.client_options = client_options
         self.stop = stop
         self.ready = ready
-        self.fps = fps
-        self.scale = scale
         self.source = source
         if not source:
             raise ValueError("source required")
@@ -99,6 +108,9 @@ class CamReader(ABC):
     async def run(self) -> None:
         """Run the reader, setting ready event when frames are available."""
         async for frame in self._read():
+            LOG.debug(
+                f"Received frame - stream_id:%s size:%d", self.stream_id, len(frame)
+            )
             self._frame = frame
             self.ready.set()
             self.produce_count += 1

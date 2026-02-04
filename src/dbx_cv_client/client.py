@@ -5,95 +5,61 @@ import json
 import os
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Annotated, Any
 
-import pyaml
-import typer
+import cyclopts
 from zerobus.sdk import StreamConfigurationOptions, TableProperties
 from zerobus.sdk.aio import ZerobusStream
 from zerobus.sdk.aio.zerobus_sdk import grpc
 from zerobus.sdk.shared import OAuthHeadersProvider, zerobus_service_pb2_grpc
-from zerobus.sdk.shared.definitions import IngestRecordResponse
 
 from dbx_cv_client import logger
 from dbx_cv_client.cam_reader.cam_reader import CamReader, create_cam_reader
-from dbx_cv_client.options import MerakiOptions, WorkspaceOptions
+from dbx_cv_client.options import ClientOptions, MerakiOptions, WorkspaceOptions
 
 LOG = logger(__name__)
 
 
-_FLUSH_INTERVAL_DEFAULT = 5.0
-_MAX_INFLIGHT_RECORDS_DEFAULT = 10_000
-
-
-@dataclass
-class ZerobusStats:
-    """Tracks Zerobus stream statistics."""
-
-    flush_count: int = field(default=0)  # Records flushed to server
-    ack_count: int = field(default=0)
-    ingest_count: int = field(default=0)  # Records sent to stream
-
-
-# Mutable container for tracking zerobus ack count across callbacks
-_zerobus_stats: list[ZerobusStats | None] = [None]
-
-
-def _log_stats(
-    cam_readers: list[CamReader], stream: ZerobusStream, running: bool = True
-) -> None:
-    total_produce = sum(r.produce_count for r in cam_readers)
-    total_consume = sum(r.consume_count for r in cam_readers)
-    if total_produce > 0 or total_consume > 0:
-        # __pending_futures: sent but not yet acknowledged
-        # __record_queue: queued but not yet sent
-        pending_ack = len(stream._ZerobusStream__pending_futures)
-        queued = stream._ZerobusStream__record_queue.qsize()
-        zerobus_stats = _zerobus_stats[0] or ZerobusStats()
-        stats = {
-            "running": running,
-            "state": stream._ZerobusStream__state,
-            "pending_ack": pending_ack,
-            "queued": queued,
-        }
-        stats.update(asdict(zerobus_stats))
-        stats.update(
-            {
-                "total_produce": total_produce,
-                "total_consume": total_consume,
-            }
-        )
-        stats.update(
-            {
-                "streams": {
-                    reader.stream_id: {
-                        "produce": reader.produce_count,
-                        "consume": reader.consume_count,
-                    }
-                    for reader in cam_readers
-                }
-            }
-        )
-
-        stats_yaml = pyaml.dump(stats, sort_keys=False).strip()
-        LOG.info(f"Stats:\n{stats_yaml}")
-
-
-async def _log_stats_periodically(
+async def _log_client_summary_periodically(
+    client_options: ClientOptions,
+    start_time: float,
     stop: asyncio.Event,
     cam_readers: list[CamReader],
-    stream: ZerobusStream,
-    interval: float,
+    ingested_count_ref: list[int],
 ) -> None:
-    """Log aggregate stats from cam_readers every interval seconds."""
-    while not stop.is_set():
+    """
+    Periodically log a concise client summary.
+
+    Notes:
+    - "frames_read" is sourced from CamReader.produce_count (frames produced by readers).
+    - "frames_ingested" counts calls to stream.ingest_record(), which can exceed frames_read
+      when frame_multiplier is enabled.
+    """
+    while client_options.log_stats_interval and not stop.is_set():
         try:
-            await asyncio.sleep(interval)
-            _log_stats(cam_readers, stream)
+            await asyncio.sleep(client_options.log_stats_interval)
+            run_time = time.monotonic() - start_time
+            frames_produced = sum(r.produce_count for r in cam_readers)
+            frames_consumed = sum(r.consume_count for r in cam_readers)
+            reader_count = len(cam_readers)
+            LOG.info(
+                "Client summary"
+                "run_time=%.1fs "
+                "readers:%s "
+                "frames_produced=%d "
+                "frames_consumed:%s "
+                "frames_ingested=%d",
+                run_time,
+                reader_count,
+                frames_produced,
+                frames_consumed,
+                ingested_count_ref[0],
+            )
         except asyncio.CancelledError:
             break
         except Exception:
-            LOG.error("Error logging stats", exc_info=True)
+            LOG.error("Error logging client summary", exc_info=True)
 
 
 async def _run_cam_reader(
@@ -115,59 +81,51 @@ async def _run_cam_reader(
 
 
 async def _run(
+    workspace_options: WorkspaceOptions,
+    client_options: ClientOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
-    max_inflight_records: int | None,
-    flush_interval: float | None,
-    log_stats_interval: float,
-    frame_multiplier: int,
-    workspace_options: WorkspaceOptions,
     cam_readers: list[CamReader],
 ) -> None:
     """Streams RTSP frames to a Databricks ingestion table."""
     import dbx_cv_client.models.record_pb2 as record_pb2
 
-    # Reset zerobus stats
-    zerobus_stats = ZerobusStats()
-    _zerobus_stats[0] = zerobus_stats
-
-    stream = await _create_stream(
-        workspace_options,
-        max_inflight_records=max_inflight_records,
-    )
+    stream = await _create_stream(workspace_options)
 
     try:
+        start_time = datetime.now(timezone.utc)
+        start_monotonic = time.monotonic()
+        # Mutable container to share ingested count with the periodic logger task.
+        ingested_count_ref: list[int] = [0]
+
         cam_reader_tasks: list[asyncio.Task] = [
             asyncio.create_task(_run_cam_reader(stop, cam_reader))
             for cam_reader in cam_readers
         ]
-        stats_task = asyncio.create_task(
-            _log_stats_periodically(
+        summary_task = asyncio.create_task(
+            _log_client_summary_periodically(
+                client_options,
+                start_time=start_monotonic,
                 stop=stop,
                 cam_readers=cam_readers,
-                stream=stream,
-                interval=log_stats_interval,
+                ingested_count_ref=ingested_count_ref,
             )
         )
-        last_flush: float | None = None
         try:
             while not stop.is_set():
                 await ready.wait()
                 ready.clear()
-                ingested = False
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
-                        if last_flush is None:
-                            last_flush = time.monotonic()
-                        for idx in range(1 + (frame_multiplier or 0)):
+                        for idx in range(1 + (client_options.frame_multiplier or 0)):
                             stream_id = cam_reader.stream_id
                             if idx > 0:
                                 stream_id = f"{stream_id}_{idx}"
-                            metadata = {
+                            metadata: dict[str, Any] = {
                                 "stream_id": stream_id,
                                 "source": cam_reader.source,
-                                "fps": cam_reader.fps,
-                                "scale": cam_reader.scale,
+                                "fps": cam_reader.client_options.fps,
+                                "scale": cam_reader.client_options.scale,
                             }
                             if cam_reader.device_info:
                                 metadata["device_info"] = cam_reader.device_info
@@ -177,38 +135,25 @@ async def _run(
                                 metadata=json.dumps(metadata),
                                 content=frame,
                             )
-                            # await queues the record; returned future (for ack) is ignored
-                            ack_future = await stream.ingest_record(record)
-
-                            def _done_callback(_: IngestRecordResponse):
-                                zerobus_stats.ack_count += 1
-
-                            ack_future.add_done_callback(_done_callback)
-                            ingested = True
-                            zerobus_stats.ingest_count += 1
-                if (
-                    ingested
-                    and flush_interval is not None
-                    and time.monotonic() - last_flush >= flush_interval
-                ):
-                    LOG.info("Flush requested")
-                    await stream.flush()
-                    last_flush = time.monotonic()
+                            # Once this returns, the record is queued for ingestion.
+                            # There is no need to track or await server acknowledgements.
+                            await stream.ingest_record(record)
+                            ingested_count_ref[0] += 1
         finally:
             stop.set()
-            stats_task.cancel()
+            summary_task.cancel()
             for cam_reader_task in cam_reader_tasks:
                 cam_reader_task.cancel()
             await stream.flush()
-            await asyncio.gather(*cam_reader_tasks, stats_task, return_exceptions=True)
-            _log_stats(cam_readers, stream, running=False)
+            await asyncio.gather(
+                *cam_reader_tasks, summary_task, return_exceptions=True
+            )
     finally:
         await stream.close()
 
 
 async def _create_stream(
     workspace_options: WorkspaceOptions,
-    max_inflight_records: int | None,
 ) -> ZerobusStream:
     """Create and initialize a ZerobusStream."""
     LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
@@ -227,7 +172,7 @@ async def _create_stream(
         workspace_options.client_id,
         workspace_options.client_secret,
     )
-    channel_options = [
+    channel_options: list[tuple[str, Any]] = [
         ("grpc.max_send_message_length", -1),
         ("grpc.max_receive_message_length", -1),
     ]
@@ -249,19 +194,7 @@ async def _create_stream(
     )
 
     stub = zerobus_service_pb2_grpc.ZerobusStub(channel)
-
-    def _ack_callback(_: IngestRecordResponse):
-        # Track acknowledged records
-        zerobus_stats = _zerobus_stats[0] or ZerobusStats()
-        zerobus_stats.flush_count += 1
-        _zerobus_stats[0] = zerobus_stats
-
-    stream_configuration_options = StreamConfigurationOptions(
-        ack_callback=_ack_callback
-    )
-    if max_inflight_records is not None:
-        stream_configuration_options.max_inflight_records = max_inflight_records
-    LOG.info(f"Stream configuration options: {stream_configuration_options.__dict__}")
+    stream_configuration_options = StreamConfigurationOptions()
 
     stream = ZerobusStream(
         stub=stub,
@@ -275,131 +208,33 @@ async def _create_stream(
 
 
 def run(
-    host: str = typer.Option(
-        envvar="DATABRICKS_HOST",
-        help="Databricks workspace URL or host",
-    ),
-    region: str = typer.Option(
-        envvar="DATABRICKS_REGION",
-        help="Cloud region for the Zerobus endpoint",
-    ),
-    client_id: str = typer.Option(
-        envvar="DATABRICKS_CLIENT_ID",
-        help="OAuth client ID",
-    ),
-    client_secret: str = typer.Option(
-        envvar="DATABRICKS_CLIENT_SECRET",
-        help="OAuth client secret",
-    ),
-    table_name: str = typer.Option(
-        envvar="DATABRICKS_TABLE_NAME",
-        help="Fully qualified table name (catalog.schema.table)",
-    ),
-    flush_interval: float | None = typer.Option(
-        default=_FLUSH_INTERVAL_DEFAULT,
-        envvar="FLUSH_INTERVAL",
-        help="Interval for flushing the stream in seconds",
-    ),
-    max_inflight_records: int | None = typer.Option(
-        default=_MAX_INFLIGHT_RECORDS_DEFAULT,
-        envvar="MAX_INFLIGHT_RECORDS",
-        help="Maximum number of records that can be sent to the server before waiting for acknowledgment",
-    ),
-    log_stats_interval: float = typer.Option(
-        default=5.0,
-        envvar="LOG_STATS_INTERVAL",
-        help="Interval for logging stats in seconds",
-    ),
-    fps: int = typer.Option(
-        default=1,
-        envvar="FPS",
-        help="Frames per second",
-    ),
-    scale: int = typer.Option(
-        default=1080,
-        envvar="SCALE",
-        help="Scale",
-    ),
-    sources: list[str] = typer.Option(
-        None,
-        "--source",
-        envvar="SOURCES",
-        help="Source URLs for camera frames (RTSP, HTTP, etc.)",
-    ),
-    meraki_api_base_url: str | None = typer.Option(
-        "https://api.meraki.com/api/v1",
-        "--meraki-api-base-url",
-        envvar="MERAKI_API_BASE_URL",
-        help="Meraki API token",
-    ),
-    meraki_api_token: str | None = typer.Option(
-        None,
-        "--meraki-api-token",
-        envvar="MERAKI_API_TOKEN",
-        help="Meraki API token",
-    ),
-    meraki_vault_url: str | None = typer.Option(
-        None,
-        "--meraki-vault-url",
-        envvar="MERAKI_VAULT_URL",
-        help="Meraki Azure Key Vault URL",
-    ),
-    meraki_secret_name: str | None = typer.Option(
-        None,
-        "--meraki-secret-name",
-        envvar="MERAKI_SECRET_NAME",
-        help="Meraki Azure Key Vault secret name",
-    ),
-    rtsp_ffmpeg_args: list[str] = typer.Option(
-        [],
-        "--rtsp-ffmpeg-arg",
-        envvar="RTPSP_FFMPEG_ARGS",
-        help="Additional FFmpeg arguments for RTSP sources",
-    ),
-    zerobus_ip: str = typer.Option(
-        None,
-        "--zerobus-ip",
-        envvar="ZEROBUS_IP",
-        help="Override DNS Zerobus host IP",
-    ),
-    frame_multiplier: int = typer.Option(
-        0,
-        "--frame-multiplier",
-        envvar="FRAME_MULTIPLIER",
-        help="Sends a frame multiple times",
-    ),
+    workspace_options: WorkspaceOptions,
+    client_options: ClientOptions = ClientOptions(),
+    meraki_options: MerakiOptions | None = None,
+    sources: Annotated[
+        list[str] | None,
+        cyclopts.Parameter(
+            name="source",
+            env_var="SOURCES",
+            help="Sources for camera frames",
+            negative_iterable="",
+        ),
+    ] = None,
 ) -> None:
     """Runs the async streaming client until interrupted."""
 
-    workspace_options = WorkspaceOptions(
-        host=host,
-        region=region,
-        client_id=client_id,
-        client_secret=client_secret,
-        table_name=table_name,
-        zerobus_ip=zerobus_ip,
-    )
-
-    meraki_options = MerakiOptions(
-        api_base_url=meraki_api_base_url,
-        api_token=meraki_api_token,
-        vault_url=meraki_vault_url,
-        secret_name=meraki_secret_name,
-    )
     if not sources:
-        raise typer.BadParameter("At least one source is required")
+        raise ValueError("At least one source is required")
 
     stop = asyncio.Event()
     ready = asyncio.Event()
     try:
         cam_readers = [
             create_cam_reader(
+                client_options=client_options,
+                meraki_options=meraki_options,
                 stop=stop,
                 ready=ready,
-                fps=fps,
-                scale=scale,
-                meraki_options=meraki_options,
-                rtsp_ffmpeg_args=rtsp_ffmpeg_args,
                 source=source,
             )
             for source in sources
@@ -409,13 +244,10 @@ def run(
         )
         asyncio.run(
             _run(
+                workspace_options=workspace_options,
+                client_options=client_options,
                 stop=stop,
                 ready=ready,
-                flush_interval=flush_interval,
-                max_inflight_records=max_inflight_records,
-                log_stats_interval=log_stats_interval,
-                frame_multiplier=frame_multiplier,
-                workspace_options=workspace_options,
                 cam_readers=cam_readers,
             )
         )
