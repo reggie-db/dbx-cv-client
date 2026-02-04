@@ -106,7 +106,7 @@ class RTSPReader(CamReader):
         cmds = [
             "ffmpeg",
         ]
-        if rtsp_ffmpeg_args := self.client_options.rtsp_ffmpeg_args:
+        if rtsp_ffmpeg_args := self.cam_reader_options.rtsp_ffmpeg_args:
             cmds.extend(rtsp_ffmpeg_args)
         cmds.extend(
             [
@@ -123,7 +123,7 @@ class RTSPReader(CamReader):
                 ("-i", self.source),
                 (
                     "-vf",
-                    f"fps={self.client_options.fps},scale=-1:{self.client_options.scale},format=yuvj420p",
+                    f"fps={self.cam_reader_options.fps},scale=-1:{self.cam_reader_options.scale},format=yuvj420p",
                 ),
                 ("-pix_fmt", "yuvj420p"),
                 ("-q:v", "7"),

@@ -26,7 +26,7 @@ class MerakiReader(CamReader):
 
     async def _read(self) -> AsyncIterator[bytes]:
         """Yield camera frames at the configured FPS rate."""
-        fps = self.client_options.fps
+        fps = self.cam_reader_options.fps
         frame_interval = 1.0 / fps
         session = aiohttp.ClientSession(
             headers={

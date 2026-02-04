@@ -60,11 +60,11 @@ async def test_meraki_reader(
     )
 
     # ClientOptions configures common reader behavior (fps, scale, etc).
-    client_options = CamReaderOptions(fps=fps, scale=scale)
+    cam_reader_options = CamReaderOptions(fps=fps, scale=scale)
 
     try:
         reader = MerakiReader(
-            client_options=client_options,
+            cam_reader_options=cam_reader_options,
             meraki_options=meraki_options,
             stop=stop_event,
             ready=ready_event,

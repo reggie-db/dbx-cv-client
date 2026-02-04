@@ -53,6 +53,10 @@ dbx-cv-client client \
 | `--table-name` | `DATABRICKS_TABLE_NAME` | Fully qualified table name |
 | `--zerobus-ip` | `DATABRICKS_ZEROBUS_IP` | Override DNS Zerobus host IP |
 
+Optional environment variable:
+
+- `DATABRICKS_ZEROBUS_IP_RESOLVE`: Set to `true` to skip local DNS resolution and resolve the Zerobus endpoint using public DNS (`1.1.1.1`).
+
 #### Client Options
 
 | Flag | Env Var | Default | Description |
@@ -60,6 +64,17 @@ dbx-cv-client client \
 | `--log-stats-interval` | `LOG_STATS_INTERVAL` | `5.0` | Seconds between client summary logs (`0` or empty disables) |
 | `--flush-interval` | `FLUSH_INTERVAL` | | Reserved for future use (not used by the current client loop) |
 | `--max-inflight-records` | `MAX_INFLIGHT_RECORDS` | | Reserved for future use (not used by the current stream configuration) |
+| `--metadata-ip-info-url` | `METADATA_IP_INFO_URL` | `https://ipwho.is/` | If set, fetch IP info JSON and include it as `ip_info` in record metadata |
+| `--metadata-ip-info-attempts` | `METADATA_IP_INFO_ATTEMPTS` | `3` | Max attempts to fetch IP info |
+| `--metadata-ip-info-retry-interval` | `METADATA_IP_INFO_RETRY_INTERVAL` | `3` | Seconds between IP info fetch retries |
+
+Client summary logs include:
+
+- `run_time`: seconds since client start
+- `readers`: number of configured sources
+- `frames_produced`: total frames produced by readers
+- `frames_consumed`: total frames pulled by the client loop
+- `frames_ingested`: total `ingest_record()` calls (can exceed frames_produced when `--frame-multiplier` is enabled)
 
 #### Source Options
 

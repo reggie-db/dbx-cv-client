@@ -27,7 +27,7 @@ class DirectoryReader(CamReader):
 
         Notes:
         - Preserves the existing behavior of defaulting directory replay to 5 FPS when
-          `client_options.fps` is not set or is non-positive.
+          `cam_reader_options.fps` is not set or is non-positive.
         """
         if not self.stream_id:
             self.stream_id = Path(self.source).name
@@ -35,13 +35,13 @@ class DirectoryReader(CamReader):
 
     async def _read(self) -> AsyncIterator[bytes]:
         """Yield frames from images in the directory at configured FPS."""
-        frame_interval = 1.0 / self.client_options.fps
+        frame_interval = 1.0 / self.cam_reader_options.fps
 
         # Discover and shuffle images
         image_files = self._image_files(self.source)
 
         LOG.info(
-            f"DirectoryReader starting: {len(image_files)} images at {self.client_options.fps}fps"
+            f"DirectoryReader starting: {len(image_files)} images at {self.cam_reader_options.fps}fps"
         )
 
         idx = 0

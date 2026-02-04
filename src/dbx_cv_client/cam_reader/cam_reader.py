@@ -18,7 +18,7 @@ LOG = logger(__name__)
 
 
 def create_cam_reader(
-    client_options: CamReaderOptions,
+    cam_reader_options: CamReaderOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
     source: str,
@@ -31,7 +31,7 @@ def create_cam_reader(
 
         LOG.info(f"Creating directory reader for source: {source}")
         return DirectoryReader(
-            client_options=client_options,
+            cam_reader_options=cam_reader_options,
             stop=stop,
             ready=ready,
             source=source,
@@ -44,7 +44,7 @@ def create_cam_reader(
 
         LOG.info(f"Creating RTSP reader for source: {source}")
         return RTSPReader(
-            client_options=client_options,
+            cam_reader_options=cam_reader_options,
             stop=stop,
             ready=ready,
             source=source,
@@ -59,7 +59,7 @@ def create_cam_reader(
         meraki_options=meraki_options,
         stop=stop,
         ready=ready,
-        client_options=client_options,
+        cam_reader_options=cam_reader_options,
         source=source,
         stream_id=stream_id,
     )
@@ -69,7 +69,7 @@ def create_cam_reader(
 class CamReader(ABC):
     """Base class for camera readers."""
 
-    client_options: CamReaderOptions
+    cam_reader_options: CamReaderOptions
     stop: asyncio.Event
     ready: asyncio.Event
     source: str
@@ -85,7 +85,8 @@ class CamReader(ABC):
         """
         Initialize internal state after dataclass construction.
 
-        This preserves the original `__init__` validation and internal attribute layout.
+        Notes:
+        - If `stream_id` is not provided, it is derived from `source` (URL path when possible).
         """
         if not self.stream_id:
             try:
@@ -137,7 +138,7 @@ class CamReader(ABC):
         ...
 
     def _resize_image(self, img: np.ndarray) -> bytes | None:
-        scale = self.client_options.scale
+        scale = self.cam_reader_options.scale
         if not scale:
             return None
 

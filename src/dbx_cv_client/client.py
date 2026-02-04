@@ -21,7 +21,7 @@ LOG = logger(__name__)
 
 
 async def _log_client_summary_periodically(
-    client_options: CamReaderOptions,
+    cam_reader_options: CamReaderOptions,
     start_time: float,
     stop: asyncio.Event,
     cam_readers: list[CamReader],
@@ -31,16 +31,16 @@ async def _log_client_summary_periodically(
     Periodically log a concise client summary.
 
     Notes:
-    - Logging cadence is controlled by `ClientOptions.log_stats_interval`. If it is falsy,
+    - Logging cadence is controlled by `CamReaderOptions.log_stats_interval`. If it is falsy,
       no periodic logs are emitted.
     - "frames_produced" is sourced from `CamReader.produce_count` (frames produced by readers).
     - "frames_consumed" is sourced from `CamReader.consume_count` (frames pulled by the client loop).
     - "frames_ingested" counts calls to `stream.ingest_record()`, which can exceed frames_produced
-      when `ClientOptions.frame_multiplier` is enabled.
+      when `CamReaderOptions.frame_multiplier` is enabled.
     """
-    while client_options.log_stats_interval and not stop.is_set():
+    while cam_reader_options.log_stats_interval and not stop.is_set():
         try:
-            await asyncio.sleep(client_options.log_stats_interval)
+            await asyncio.sleep(cam_reader_options.log_stats_interval)
             run_time = time.monotonic() - start_time
             frames_produced = sum(r.produce_count for r in cam_readers)
             frames_consumed = sum(r.consume_count for r in cam_readers)
@@ -84,7 +84,7 @@ async def _run_cam_reader(
 
 async def _run(
     workspace_options: WorkspaceOptions,
-    client_options: CamReaderOptions,
+    cam_reader_options: CamReaderOptions,
     stop: asyncio.Event,
     ready: asyncio.Event,
     cam_readers: list[CamReader],
@@ -95,7 +95,7 @@ async def _run(
     stream = await _create_stream(workspace_options)
 
     try:
-        ip_info_data = await ip_info.get(client_options)
+        ip_info_data = await ip_info.get(cam_reader_options)
         start_monotonic = time.monotonic()
         # Mutable container to share ingested count with the periodic logger task.
         ingested_count_ref: list[int] = [0]
@@ -106,7 +106,7 @@ async def _run(
         ]
         summary_task = asyncio.create_task(
             _log_client_summary_periodically(
-                client_options,
+                cam_reader_options,
                 start_time=start_monotonic,
                 stop=stop,
                 cam_readers=cam_readers,
@@ -119,15 +119,17 @@ async def _run(
                 ready.clear()
                 for cam_reader in cam_readers:
                     if frame := cam_reader.get_frame():
-                        for idx in range(1 + (client_options.frame_multiplier or 0)):
+                        for idx in range(
+                            1 + (cam_reader_options.frame_multiplier or 0)
+                        ):
                             stream_id = cam_reader.stream_id
                             if idx > 0:
                                 stream_id = f"{stream_id}_{idx}"
                             metadata: dict[str, Any] = {
                                 "stream_id": stream_id,
                                 "source": cam_reader.source,
-                                "fps": cam_reader.client_options.fps,
-                                "scale": cam_reader.client_options.scale,
+                                "fps": cam_reader.cam_reader_options.fps,
+                                "scale": cam_reader.cam_reader_options.scale,
                             }
                             if ip_info_data:
                                 metadata["ip_info"] = ip_info_data
@@ -222,7 +224,7 @@ async def _create_stream(
 
 def run(
     workspace_options: WorkspaceOptions,
-    client_options: CamReaderOptions = CamReaderOptions(),
+    cam_reader_options: CamReaderOptions = CamReaderOptions(),
     meraki_options: MerakiOptions | None = None,
     sources: Annotated[
         list[str] | None,
@@ -244,7 +246,7 @@ def run(
     try:
         cam_readers = [
             create_cam_reader(
-                client_options=client_options,
+                cam_reader_options=cam_reader_options,
                 meraki_options=meraki_options,
                 stop=stop,
                 ready=ready,
@@ -258,7 +260,7 @@ def run(
         asyncio.run(
             _run(
                 workspace_options=workspace_options,
-                client_options=client_options,
+                cam_reader_options=cam_reader_options,
                 stop=stop,
                 ready=ready,
                 cam_readers=cam_readers,
