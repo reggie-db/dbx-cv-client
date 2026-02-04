@@ -192,6 +192,22 @@ class CamReaderOptions:
         ),
     ] = "https://ipwho.is/"
 
+    metadata_ip_info_attempts: Annotated[
+        int,
+        cyclopts.Parameter(
+            env_var="METADATA_IP_INFO_ATTEMPTS",
+            help="IP Info attempts",
+        ),
+    ] = 3
+
+    metadata_ip_info_retry_interval: Annotated[
+        float,
+        cyclopts.Parameter(
+            env_var="METADATA_IP_INFO_RETRY_INTERVAL",
+            help="IP Info retry interval in seconds",
+        ),
+    ] = 3
+
 
 @dataclass
 class MerakiOptions:

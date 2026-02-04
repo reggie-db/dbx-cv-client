@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -99,7 +100,11 @@ async def _run(
 
     try:
         ip_info_data = (
-            await ip_info(client_options.metadata_ip_info_url)
+            await ip_info(
+                client_options.metadata_ip_info_url,
+                client_options.metadata_ip_info_attempts,
+                client_options.metadata_ip_info_retry_interval,
+            )
             if client_options.metadata_ip_info_url
             else None
         )
@@ -229,24 +234,48 @@ async def _create_stream(
 
 @lru_cache(maxsize=None)
 async def ip_info(
-    url: str, max_attempts: int = 3, retry_interval: float = 1
+    url: str, max_attempts: int, retry_interval: float = 1
 ) -> dict | None:
     async with aiohttp.ClientSession() as session:
-        attempt = 0
+        attempt_idx = 0
+
+        def _log(level: int, msg: str, exc_info: bool | None = None, **kwargs) -> None:
+            log_data = {
+                "url": url,
+                "attempt": attempt_idx + 1,
+                "max_attempts": max_attempts,
+                "retry_interval": retry_interval,
+                **kwargs,
+            }
+            LOG.log(
+                level,
+                msg + " - %s",
+                " ".join(f"{k}:{v}" for k, v in log_data.items()),
+                exc_info=exc_info,
+            )
+
         while True:
             try:
                 async with session.get(url) as resp:
                     resp.raise_for_status()
-                    return await resp.json()
-            except Exception:
-                if attempt < max_attempts:
-                    attempt += 1
-                    LOG.warning(
-                        f"Failed to fetch IP info, retrying in {retry_interval} second{'s' if retry_interval > 1 else ''}: {url}"
+                    ip_info_data = await resp.json()
+                    _log(level=logging.DEBUG, msg="IP info fetched", data=ip_info_data)
+                    return ip_info_data
+            except Exception as e:
+                if max_attempts == -1 or attempt_idx < (max_attempts - 1):
+                    _log(
+                        level=logging.WARNING,
+                        msg="IP info request failed",
+                        error=e,
                     )
                     await asyncio.sleep(retry_interval)
+                    attempt_idx += 1
                 else:
-                    LOG.warning("Failed to fetch IP info", exc_info=True)
+                    _log(
+                        level=logging.ERROR,
+                        msg="IP info lookup failed",
+                        exc_info=True,
+                    )
                     return None
 
 
