@@ -16,6 +16,7 @@ dependencies = [
     "grpcio-tools>=1.60.0,<2.0",
     "numpy",
     "opencv-python-headless",
+    "dnspython",
     "pyaml",
     "cyclopts",
 ]

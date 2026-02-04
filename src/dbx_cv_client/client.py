@@ -1,4 +1,4 @@
-"""Streaming client for ingesting RTSP frames to Databricks."""
+"""Streaming client for ingesting camera frames to Databricks via Zerobus."""
 
 import asyncio
 import json
@@ -32,9 +32,12 @@ async def _log_client_summary_periodically(
     Periodically log a concise client summary.
 
     Notes:
-    - "frames_read" is sourced from CamReader.produce_count (frames produced by readers).
-    - "frames_ingested" counts calls to stream.ingest_record(), which can exceed frames_read
-      when frame_multiplier is enabled.
+    - Logging cadence is controlled by `ClientOptions.log_stats_interval`. If it is falsy,
+      no periodic logs are emitted.
+    - "frames_produced" is sourced from `CamReader.produce_count` (frames produced by readers).
+    - "frames_consumed" is sourced from `CamReader.consume_count` (frames pulled by the client loop).
+    - "frames_ingested" counts calls to `stream.ingest_record()`, which can exceed frames_produced
+      when `ClientOptions.frame_multiplier` is enabled.
     """
     while client_options.log_stats_interval and not stop.is_set():
         try:
@@ -87,7 +90,7 @@ async def _run(
     ready: asyncio.Event,
     cam_readers: list[CamReader],
 ) -> None:
-    """Streams RTSP frames to a Databricks ingestion table."""
+    """Streams camera frames to a Databricks ingestion table."""
     import dbx_cv_client.models.record_pb2 as record_pb2
 
     stream = await _create_stream(workspace_options)
@@ -156,7 +159,8 @@ async def _create_stream(
     workspace_options: WorkspaceOptions,
 ) -> ZerobusStream:
     """Create and initialize a ZerobusStream."""
-    LOG.info(f"zerobus server_endpoint: {workspace_options.server_endpoint}")
+    server_endpoint = workspace_options.server_endpoint
+    LOG.info(f"zerobus server_endpoint: {server_endpoint}")
     LOG.info(f"zerobus workspace_url: {workspace_options.workspace_url}")
 
     import dbx_cv_client.models.record_pb2 as record_pb2
@@ -176,16 +180,18 @@ async def _create_stream(
         ("grpc.max_send_message_length", -1),
         ("grpc.max_receive_message_length", -1),
     ]
-    if workspace_options.zerobus_ip:
-        target = f"{workspace_options.zerobus_ip}:443"
+    server_endpoint_ip, resolved = workspace_options.server_endpoint_ip()
+    if not resolved:
+        target = f"{server_endpoint_ip}:443"
+        LOG.info(f"zerobus target: {target}")
         channel_options.extend(
             [
-                ("grpc.ssl_target_name_override", workspace_options.server_endpoint),
-                ("grpc.default_authority", workspace_options.server_endpoint),
+                ("grpc.ssl_target_name_override", server_endpoint),
+                ("grpc.default_authority", server_endpoint),
             ]
         )
     else:
-        target = workspace_options.server_endpoint
+        target = server_endpoint
 
     channel = grpc.aio.secure_channel(
         target,

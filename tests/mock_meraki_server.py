@@ -1,4 +1,11 @@
-"""Mock Meraki API server for testing."""
+"""
+Mock Meraki API server for testing.
+
+Endpoints:
+- POST `/devices/{serial}/camera/generateSnapshot`: returns a snapshot URL to poll
+- GET `/snapshot/{serial}/{snapshot_id}.jpg`: returns a JPEG (may return 404 to simulate "not ready")
+- GET `/devices/{serial}`: returns basic device info JSON
+"""
 
 import argparse
 import random

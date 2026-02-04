@@ -51,15 +51,15 @@ dbx-cv-client client \
 | `--client-id` | `DATABRICKS_CLIENT_ID` | OAuth client ID |
 | `--client-secret` | `DATABRICKS_CLIENT_SECRET` | OAuth client secret |
 | `--table-name` | `DATABRICKS_TABLE_NAME` | Fully qualified table name |
-| `--zerobus-ip` | `ZEROBUS_IP` | Override DNS Zerobus host IP |
+| `--zerobus-ip` | `DATABRICKS_ZEROBUS_IP` | Override DNS Zerobus host IP |
 
-#### Stream Options
+#### Client Options
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
-| `--flush-interval` | `FLUSH_INTERVAL` | `5.0` | Seconds between flushes |
-| `--max-inflight-records` | `MAX_INFLIGHT_RECORDS` | `10000` | Max records before waiting for ack |
-| `--log-stats-interval` | `LOG_STATS_INTERVAL` | `5.0` | Seconds between stats logs |
+| `--log-stats-interval` | `LOG_STATS_INTERVAL` | `5.0` | Seconds between client summary logs (`0` or empty disables) |
+| `--flush-interval` | `FLUSH_INTERVAL` | | Reserved for future use (not used by the current client loop) |
+| `--max-inflight-records` | `MAX_INFLIGHT_RECORDS` | | Reserved for future use (not used by the current stream configuration) |
 
 #### Source Options
 
@@ -84,13 +84,13 @@ Source type is auto-detected:
 | `--meraki-vault-url` | `MERAKI_VAULT_URL` | | Azure Key Vault URL |
 | `--meraki-secret-name` | `MERAKI_SECRET_NAME` | | Secret name in Key Vault |
 
-Meraki cameras include device info (name, model, location, etc.) in frame metadata, fetched once at startup.
+Meraki cameras include device info (name, model, location, etc.) in frame metadata, fetched once on the first read.
 
 #### RTSP Options
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `--rtsp-ffmpeg-arg` | `RTSP_FFMPEG_ARGS` | Additional FFmpeg arguments |
+| `--rtsp-ffmpeg-arg` | `RTPSP_FFMPEG_ARGS` | Additional FFmpeg arguments |
 
 ### Examples
 
@@ -152,12 +152,9 @@ uv run pytest
 
 ## Testing
 
-A mock Meraki server is included for testing:
-
 ```bash
-# Terminal 1: Start mock server
-uv run python tests/mock_meraki_server.py test_image.jpg
-
-# Terminal 2: Run test client
-uv run python tests/test_meraki_reader.py --frames 3
+uv pip install -e ".[dev]"
+uv run pytest
 ```
+
+Note: The Meraki reader test expects a JPEG file at `./test_image.jpg` (repo root) to seed the mock server response.

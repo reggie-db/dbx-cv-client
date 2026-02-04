@@ -1,4 +1,8 @@
-"""Test script for MerakiReader against a running mock server."""
+"""
+Pytest coverage for `MerakiReader` using a local mock Meraki server.
+
+This test starts an aiohttp server on an ephemeral port inside the test process.
+"""
 
 import argparse
 import asyncio

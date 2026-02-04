@@ -1,12 +1,17 @@
 """Common options and utilities shared across CLI commands."""
 
+import ipaddress
+import os
+import socket
 from dataclasses import dataclass
+from functools import cache, lru_cache
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 
 import cyclopts
 from azure.identity.aio import DefaultAzureCredential
 from azure.keyvault.secrets.aio import SecretClient
+from dns import rdatatype, resolver
 
 _AZURE_DATABRICKS_DOMAIN = "azuredatabricks.net"
 
@@ -23,9 +28,6 @@ class WorkspaceOptions:
         str, cyclopts.Parameter(env_var="DATABRICKS_CLIENT_SECRET")
     ]
     table_name: Annotated[str, cyclopts.Parameter(env_var="DATABRICKS_TABLE_NAME")]
-    zerobus_ip: Annotated[
-        str | None, cyclopts.Parameter(env_var="DATABRICKS_ZEROBUS_IP")
-    ] = None
 
     @property
     def workspace_host(self) -> str:
@@ -44,6 +46,10 @@ class WorkspaceOptions:
         return self._server_endpoint(
             self.workspace_host, self.workspace_id, self.region
         )
+
+    def server_endpoint_ip(self) -> tuple[ipaddress.IPv4Address, bool]:
+        host = self.server_endpoint
+        return self._zerobus_ip_resolve(host)
 
     @staticmethod
     def _parse_host(value: str) -> tuple[str, str]:
@@ -71,6 +77,37 @@ class WorkspaceOptions:
                 return (host, workspace_id_list[0])
 
         raise ValueError(f"Unable to extract workspace ID from URL: {value}")
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _zerobus_ip_resolve(
+        host: str,
+    ) -> tuple[ipaddress.IPv4Address, bool]:
+        force = (
+            str(True).upper() == os.getenv("DATABRICKS_ZEROBUS_IP_RESOLVE", "").upper()
+        )
+        if not force:
+            try:
+                infos = socket.getaddrinfo(
+                    host, None, family=socket.AF_INET, type=socket.SOCK_STREAM
+                )
+                ip = infos[0][4][0]
+                return ipaddress.IPv4Address(ip), True
+            except (socket.gaierror, IndexError, ValueError):
+                pass
+
+        dns_resolver = resolver.Resolver(configure=False)
+        dns_resolver.nameservers = ["1.1.1.1"]
+        dns_resolver.use_edns(0)
+        dns_resolver.lifetime = 2.0
+
+        answer = dns_resolver.resolve(host, rdtype=rdatatype.A, raise_on_no_answer=True)
+
+        for rdata in answer:
+            ip = rdata.address  # guaranteed IPv4
+            return ipaddress.IPv4Address(ip), False
+
+        raise RuntimeError(f"No IPv4 A record found for {host}")
 
     @staticmethod
     def _server_endpoint(workspace_host: str, workspace_id: str, region: str) -> str:
